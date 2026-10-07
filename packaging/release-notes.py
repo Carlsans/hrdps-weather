@@ -17,7 +17,13 @@ TITLES = {"linux": "Linux (x86_64, aarch64)", "windows": "Windows (unsigned — 
 
 
 def gh(*args):
-    return subprocess.run(["gh", *args], capture_output=True, text=True)
+    return subprocess.run(["gh", *args], capture_output=True, text=True, encoding="utf-8")
+
+
+def body_of(tag):
+    # GitHub stores release bodies with CRLF line endings: normalise before comparing or editing.
+    out = gh("release", "view", tag, "--json", "body", "--jq", ".body").stdout
+    return out.replace("\r\n", "\n").strip()
 
 
 def main(tag, name, sums_file):
@@ -27,13 +33,12 @@ def main(tag, name, sums_file):
         gh("release", "create", tag, "--title", tag, "--notes", "")
     pat = re.compile(rf"<!-- {name} -->.*?<!-- /{name} -->", re.S)
     for attempt in range(6):
-        body = gh("release", "view", tag, "--json", "body", "--jq", ".body").stdout.strip()
+        body = body_of(tag)
         new = pat.sub(block, body) if pat.search(body) else (body + "\n\n" + block).strip()
         if new != body:
             gh("release", "edit", tag, "--notes", new)
         time.sleep(3 + attempt)
-        check = gh("release", "view", tag, "--json", "body", "--jq", ".body").stdout
-        if block in check:
+        if block in body_of(tag):
             return 0
     print("could not confirm release notes", file=sys.stderr)
     return 1
