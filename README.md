@@ -13,8 +13,10 @@ synchronisés, alertes et détails heure par heure.
 
 **Option 1 — installateur (le plus simple).** Téléchargez `hrdps-weather-setup-x86_64.exe` depuis la page
 [Releases](https://github.com/Carlsans/hrdps-weather/releases/latest), lancez-le (installation par utilisateur,
-sans droits administrateur), puis cliquez sur l'icône dans la zone de notification (clic gauche : fenêtre
-complète ; clic droit : actualiser, *Démarrer avec Windows* — facultatif —, quitter). Une version portable
+sans droits administrateur), puis la fenêtre s'ouvre et une notification indique où se trouve l'icône (Windows range les nouvelles icônes
+sous la flèche **^** de la zone de notification). Clic gauche sur l'icône : fenêtre complète ; clic droit :
+actualiser, *Démarrer avec Windows* — facultatif, démarre alors discrètement sans fenêtre —, quitter.
+Relancer l'application alors qu'elle tourne déjà rouvre simplement sa fenêtre. Une version portable
 (`hrdps-weather-windows-x86_64.zip`, à décompresser n'importe où) est aussi offerte.
 
 **Windows vous avertira la première fois.** L'installateur n'est pas signé numériquement — un certificat est

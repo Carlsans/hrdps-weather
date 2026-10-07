@@ -25,14 +25,36 @@ RUN_NAME = "HRDPSWeather"
 
 
 # ── optional "start with Windows" (opt-in, per-user, no admin) ────────────────
+# ── single instance: a second launch asks the running one to show its window ─
+# (a lock file + a request file in the cache folder: no port is opened)
+def _request_file():
+    return hrdps.CACHE / "tray-open.request"
+
+
+def request_open():
+    hrdps.CACHE.mkdir(parents=True, exist_ok=True)
+    _request_file().write_text("1", encoding="utf-8")
+
+
+def consume_open_request():
+    f = _request_file()
+    if f.exists():
+        try:
+            f.unlink()
+        except OSError:
+            pass
+        return True
+    return False
+
+
 def autostart_command():
     exe = sys.executable
     if getattr(sys, "frozen", False):                          # packaged build: the exe is the tray app
-        return f'"{exe}"'
+        return f'"{exe}" tray --minimized'
     if exe.lower().endswith("python.exe"):                     # avoid a console window
         w = exe[:-len("python.exe")] + "pythonw.exe"
         exe = w if __import__("os").path.exists(w) else exe
-    return f'"{exe}" -m hrdps_weather tray'
+    return f'"{exe}" -m hrdps_weather tray --minimized'
 
 
 def autostart_enabled():
@@ -92,8 +114,22 @@ def summary(d):
     return s[:127]                                              # Windows tooltip limit
 
 
+def _notify(icon):
+    try:
+        icon.notify("L'icône météo est dans la zone de notification (cliquez sur ^ si elle est masquée). "
+                    "Clic gauche : ouvrir la météo.", "hrdps-weather est démarré")
+    except Exception:
+        pass                                                     # notifications are best-effort
+
+
 # ── application ──────────────────────────────────────────────────────────────
-def run():
+def run(minimized=False):
+    """minimized=True (used by "Start with Windows"): stay quiet in the tray, no window, no notification."""
+    lock = hrdps._Lock(hrdps.CACHE / "tray.lock")
+    if not lock.acquire():                                       # already running: show its window
+        request_open()
+        return
+
     import pystray                                               # imported late: optional on Linux
     from .ui_tk import WeatherWindow
 
@@ -129,6 +165,12 @@ def run():
     icon = pystray.Icon("hrdps-weather", make_icon("…"), "HRDPS météo", pystray.Menu(*menu))
     icon.run_detached()
 
+    if not minimized:
+        # Windows hides new tray icons under the "^" overflow, which makes a healthy app look dead:
+        # open the window right away and say where the icon lives.
+        q.put("open")
+        threading.Timer(2.5, lambda: _notify(icon)).start()
+
     stop = threading.Event()
 
     def updater():
@@ -142,6 +184,8 @@ def run():
 
     def poll():
         try:
+            if consume_open_request():
+                open_window()
             while True:
                 cmd = q.get_nowait()
                 if cmd == "open":

@@ -6,7 +6,7 @@ from . import __version__
 
 HELP = """\
 commandes :
-  tray            icône de zone de notification + fenêtre (Windows, ou Linux avec une zone de notification)
+  tray            icône de zone de notification + fenêtre (--minimized : sans fenêtre au démarrage)
   popup           fenêtre météo (GTK4 si disponible, sinon Tk) ; --kill pour fermer ; --tk pour forcer Tk
   waybar          sortie JSON pour un module waybar custom (Linux)
   refresh         télécharge le dernier run HRDPS (--force pour retélécharger)
@@ -24,6 +24,7 @@ def main(argv=None):
     ap.add_argument("--kill", action="store_true")
     ap.add_argument("--tk", action="store_true")
     ap.add_argument("--force", action="store_true")
+    ap.add_argument("--minimized", action="store_true", help="tray : démarrer sans fenêtre ni notification")
     ap.add_argument("--version", action="version", version=__version__)
     a = ap.parse_args(argv)
 
@@ -76,7 +77,7 @@ def main(argv=None):
             except Exception:
                 pass
         from . import tray
-        tray.run()
+        tray.run(minimized=a.minimized)
 
 
 def selftest():

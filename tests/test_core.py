@@ -62,3 +62,17 @@ def test_lock_is_exclusive(tmp_path, monkeypatch):
     a.release()
     assert b.acquire()
     b.release()
+
+
+def test_tray_open_request_roundtrip(tmp_path, monkeypatch):
+    from hrdps_weather import tray
+    monkeypatch.setattr(hrdps, "CACHE", tmp_path)
+    assert not tray.consume_open_request()
+    tray.request_open()
+    assert tray.consume_open_request()
+    assert not tray.consume_open_request()          # consumed once
+
+
+def test_autostart_is_minimized():
+    from hrdps_weather import tray
+    assert tray.autostart_command().endswith("tray --minimized")
