@@ -1,0 +1,158 @@
+"""
+System-tray application (Windows; also works on Linux desktops with a tray).
+
+  - icon showing the current temperature, tooltip with a one-line summary
+  - left click / "Ouvrir" : full window (animated map + charts)
+  - menu: refresh now, optional start-with-Windows, quit
+
+Network access is limited to the two hosts documented in the README
+(geo.weather.gc.ca and tile.openstreetmap.org). Nothing is installed or
+started automatically: "Démarrer avec Windows" is an opt-in menu item that
+only adds/removes one value under HKCU\\...\\Run.
+"""
+import queue
+import sys
+import threading
+import tkinter as tk
+
+from PIL import Image, ImageDraw, ImageFont
+
+from . import hrdps
+
+REFRESH_EVERY = 300           # seconds between tray updates (the cache itself refreshes per model run)
+RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+RUN_NAME = "HRDPSWeather"
+
+
+# ── optional "start with Windows" (opt-in, per-user, no admin) ────────────────
+def autostart_command():
+    exe = sys.executable
+    if getattr(sys, "frozen", False):                          # packaged build: the exe is the tray app
+        return f'"{exe}"'
+    if exe.lower().endswith("python.exe"):                     # avoid a console window
+        w = exe[:-len("python.exe")] + "pythonw.exe"
+        exe = w if __import__("os").path.exists(w) else exe
+    return f'"{exe}" -m hrdps_weather tray'
+
+
+def autostart_enabled():
+    if sys.platform != "win32":
+        return False
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as k:
+            winreg.QueryValueEx(k, RUN_NAME)
+            return True
+    except OSError:
+        return False
+
+
+def set_autostart(on):
+    if sys.platform != "win32":
+        return
+    import winreg
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as k:
+        if on:
+            winreg.SetValueEx(k, RUN_NAME, 0, winreg.REG_SZ, autostart_command())
+        else:
+            try:
+                winreg.DeleteValue(k, RUN_NAME)
+            except OSError:
+                pass
+
+
+# ── icon / tooltip ────────────────────────────────────────────────────────────
+def _font(size):
+    for name in ("segoeuib.ttf", "DejaVuSans-Bold.ttf", "arialbd.ttf"):
+        try:
+            return ImageFont.truetype(name, size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
+
+
+def make_icon(text, alert=False):
+    im = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+    dr = ImageDraw.Draw(im)
+    dr.rounded_rectangle((0, 0, 63, 63), 12, fill=(30, 30, 46, 255), outline=(250, 179, 135, 255) if alert else None, width=3)
+    f = _font(40 if len(text) <= 3 else 32)
+    box = dr.textbbox((0, 0), text, font=f)
+    dr.text(((64 - (box[2] - box[0])) / 2 - box[0], (64 - (box[3] - box[1])) / 2 - box[1]), text, font=f, fill=(205, 214, 244, 255))
+    return im
+
+
+def summary(d):
+    i = d.now_index()
+    nxt = sum(d.pr[j] for j in d.upto(i, 24))
+    al = d.alerts(i)
+    s = f"{hrdps.LOCATION} {d.tt[i]:.0f}° · {d.describe(i)}"
+    s += f" · {nxt:.0f} mm/24 h" if nxt >= 0.5 else ""
+    if al:
+        s += " · ⚠ " + al[0][0].split(" · ")[0]
+    return s[:127]                                              # Windows tooltip limit
+
+
+# ── application ──────────────────────────────────────────────────────────────
+def run():
+    import pystray                                               # imported late: optional on Linux
+    from .ui_tk import WeatherWindow
+
+    root = tk.Tk()
+    root.withdraw()
+    q = queue.Queue()
+    state = {"win": None}
+
+    def open_window():
+        w = state["win"]
+        if w is not None and w.alive:
+            w.top.deiconify(); w.top.lift(); w.top.focus_force()
+        else:
+            state["win"] = WeatherWindow(root)
+
+    def update(icon):
+        hrdps.ensure_fresh()
+        d = hrdps.load()
+        if d is None:
+            icon.icon, icon.title = make_icon("…"), "HRDPS : téléchargement des données…"
+        else:
+            icon.icon = make_icon(f"{d.tt[d.now_index()]:.0f}°", bool(d.alerts(d.now_index())))
+            icon.title = summary(d)
+
+    def toggle_autostart(icon, item):
+        set_autostart(not autostart_enabled())
+
+    menu = [pystray.MenuItem("Ouvrir la météo", lambda i, it: q.put("open"), default=True),
+            pystray.MenuItem("Actualiser maintenant", lambda i, it: (hrdps.ensure_fresh(force=True), q.put("update")))]
+    if sys.platform == "win32":
+        menu.append(pystray.MenuItem("Démarrer avec Windows", toggle_autostart, checked=lambda it: autostart_enabled()))
+    menu.append(pystray.MenuItem("Quitter", lambda i, it: q.put("quit")))
+    icon = pystray.Icon("hrdps-weather", make_icon("…"), "HRDPS météo", pystray.Menu(*menu))
+    icon.run_detached()
+
+    stop = threading.Event()
+
+    def updater():
+        while not stop.is_set():
+            try:
+                update(icon)
+            except Exception:
+                pass
+            stop.wait(REFRESH_EVERY)
+    threading.Thread(target=updater, daemon=True).start()
+
+    def poll():
+        try:
+            while True:
+                cmd = q.get_nowait()
+                if cmd == "open":
+                    open_window()
+                elif cmd == "update":
+                    threading.Thread(target=update, args=(icon,), daemon=True).start()
+                elif cmd == "quit":
+                    stop.set(); icon.stop(); root.quit(); return
+        except queue.Empty:
+            pass
+        root.after(200, poll)
+
+    root.after(200, poll)
+    root.mainloop()

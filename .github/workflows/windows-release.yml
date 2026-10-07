@@ -1,0 +1,121 @@
+name: Windows build
+
+# PyInstaller cannot cross-compile, so the Windows artifacts are built here.
+# On a tag push (v*) the installer, the portable zip and SHA256SUMS are attached to that tag's
+# release. workflow_dispatch builds and uploads an artifact without releasing (to test changes).
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write          # attach assets to the release
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[build,test]"
+
+      - name: Tests on Windows
+        run: pytest -q
+
+      - name: Build (onedir — see packaging/hrdps-weather.spec for why)
+        run: pyinstaller packaging/hrdps-weather.spec --clean --noconfirm
+
+      - name: Smoke-test the packaged build
+        shell: pwsh
+        run: |
+          if (-not (Test-Path ".\dist\hrdps-weather\_internal")) { throw "expected a onedir build" }
+          .\dist\hrdps-weather\hrdps-weather.exe --version
+          # Offline: imports every native dependency from inside the bundle and renders a frame.
+          $out = (.\dist\hrdps-weather\hrdps-weather.exe selftest | Out-String)
+          Write-Host $out
+          if ($out -notmatch "render=ok") { throw "packaged selftest failed" }
+
+      - name: Tray app starts
+        # A windowed PyInstaller exe that dies on a missing module shows an error dialog and stays
+        # alive, so "still running" alone proves little; selftest above is the real import check.
+        # This only confirms the process survives startup. Informational: a runner may have no tray.
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $p = Start-Process .\dist\hrdps-weather\hrdps-weather-tray.exe -PassThru
+          Start-Sleep -Seconds 12
+          if ($p.HasExited) { throw "hrdps-weather-tray.exe exited early (code $($p.ExitCode))" }
+          Write-Host "tray app still running after 12 s"
+          Stop-Process -Id $p.Id -Force
+
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^v', ''
+          if (-not $version -or $version -notmatch '^\d') { $version = (Select-String -Path src\hrdps_weather\__init__.py -Pattern '__version__ = "([^"]+)"').Matches[0].Groups[1].Value }
+          $nsis = (Get-Command makensis -ErrorAction SilentlyContinue).Source
+          if (-not $nsis) {
+            foreach ($p in @("${env:ProgramFiles(x86)}\NSIS\makensis.exe", "$env:ProgramFiles\NSIS\makensis.exe", "$env:ChocolateyInstall\bin\makensis.exe")) {
+              if ($p -and (Test-Path $p)) { $nsis = $p; break }
+            }
+          }
+          if (-not $nsis) { choco install nsis -y --no-progress | Out-Null; $nsis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe" }
+          & $nsis "/DVERSION=$version" packaging\hrdps-weather.nsi
+          if ($LASTEXITCODE -ne 0) { throw "makensis failed ($LASTEXITCODE)" }
+
+      - name: Test the installer end to end (install, run, uninstall)
+        shell: pwsh
+        run: |
+          .\dist\hrdps-weather-setup-x86_64.exe /S
+          Start-Sleep -Seconds 10
+          $dir = "$env:LOCALAPPDATA\Programs\hrdps-weather"
+          foreach ($f in @("hrdps-weather.exe", "hrdps-weather-tray.exe", "uninstall.exe", "_internal")) {
+            if (-not (Test-Path "$dir\$f")) { throw "installer did not place $f" }
+          }
+          if (-not (Test-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\hrdps-weather.lnk")) { throw "Start Menu shortcut missing" }
+          $out = (& "$dir\hrdps-weather.exe" selftest | Out-String)
+          if ($out -notmatch "render=ok") { throw "installed selftest failed: $out" }
+          & "$dir\uninstall.exe" /S
+          Start-Sleep -Seconds 10
+          if (Test-Path "$dir\hrdps-weather.exe") { throw "uninstaller left files behind" }
+          Write-Host "install -> run -> uninstall OK"
+          exit 0
+
+      - name: Zip the portable build and hash everything
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist\hrdps-weather\* -DestinationPath dist\hrdps-weather-windows-x86_64.zip
+          Push-Location dist
+          Get-FileHash hrdps-weather-setup-x86_64.exe, hrdps-weather-windows-x86_64.zip -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } | Set-Content -Encoding ascii SHA256SUMS.txt
+          Get-Content SHA256SUMS.txt
+          Pop-Location
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hrdps-weather-windows
+          path: |
+            dist/hrdps-weather-setup-x86_64.exe
+            dist/hrdps-weather-windows-x86_64.zip
+            dist/SHA256SUMS.txt
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $sums = Get-Content dist\SHA256SUMS.txt -Raw
+          $notes = "Windows build (unsigned — see the README for the SmartScreen / Defender notes).`n`nSHA-256:`n``````n$sums``````"
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -ne 0) { gh release create $tag --title $tag --notes $notes } else { gh release edit $tag --notes $notes }
+          gh release upload $tag dist/hrdps-weather-setup-x86_64.exe dist/hrdps-weather-windows-x86_64.zip dist/SHA256SUMS.txt --clobber
