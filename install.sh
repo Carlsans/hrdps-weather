@@ -61,7 +61,7 @@ fetch "$BASE/$ASSET" "$TMP/$ASSET"
 fetch "$BASE/SHA256SUMS-linux.txt" "$TMP/SHA256SUMS-linux.txt"
 
 echo "Verifying SHA-256..."
-EXPECTED="$(grep " $ASSET\$" "$TMP/SHA256SUMS-linux.txt" | awk '{print $1}')"
+EXPECTED="$(grep " $ASSET\$" "$TMP/SHA256SUMS-linux.txt" | awk '{print $1}' || true)"
 ACTUAL="$(sha256sum "$TMP/$ASSET" | awk '{print $1}')"
 if [ -z "$EXPECTED" ] || [ "$EXPECTED" != "$ACTUAL" ]; then
     echo "Checksum mismatch for $ASSET — refusing to install." >&2
