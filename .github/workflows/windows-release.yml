@@ -114,8 +114,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = "${{ github.ref_name }}"
-          $sums = Get-Content dist\SHA256SUMS.txt -Raw
-          $notes = "Windows build (unsigned — see the README for the SmartScreen / Defender notes).`n`nSHA-256:`n``````n$sums``````"
           gh release view $tag 2>$null
-          if ($LASTEXITCODE -ne 0) { gh release create $tag --title $tag --notes $notes } else { gh release edit $tag --notes $notes }
+          if ($LASTEXITCODE -ne 0) { gh release create $tag --title $tag --notes "" }
           gh release upload $tag dist/hrdps-weather-setup-x86_64.exe dist/hrdps-weather-windows-x86_64.zip dist/SHA256SUMS.txt --clobber
+          python packaging/release-notes.py $tag windows dist/SHA256SUMS.txt

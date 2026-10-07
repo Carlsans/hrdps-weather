@@ -42,7 +42,7 @@ def run_gtk():
     from . import view as wv
 
     hrdps.ensure_fresh(force=True)               # cheap if the run is unchanged
-    app = Gtk.Application(application_id="com.waybar.weather-popup")
+    app = Gtk.Application(application_id="io.github.carlsans.hrdps-weather")
     state = {"view": None, "loading": False, "drag": None, "area": None}
 
     def make_view():

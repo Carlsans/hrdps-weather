@@ -1,0 +1,21 @@
+# Portable build environment for the Linux binary. Built on Ubuntu 22.04 (glibc 2.35) because glibc is
+# forward-compatible only: a binary built on a very new system can fail to start on an older one
+# (`GLIBC_ABI_DT_RELR' not found), never the reverse. Python 3.10 comes straight from apt there, which
+# is why the project supports Python >= 3.10.
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3.10 python3.10-venv python3.10-dev python3-pip python3-tk \
+        build-essential pkg-config libcairo2-dev binutils \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY . /app
+
+RUN python3.10 -m venv /app/.venv-build \
+    && /app/.venv-build/bin/pip install --upgrade pip \
+    && /app/.venv-build/bin/pip install -e ".[build]"
+
+# build-docker.sh bind-mounts dist/ and build/ over these so the binary lands back on the host.
+ENTRYPOINT ["/app/.venv-build/bin/pyinstaller", "packaging/hrdps-weather-linux.spec", "--clean", "--noconfirm"]

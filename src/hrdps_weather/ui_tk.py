@@ -20,8 +20,12 @@ FRAME_MS = 66            # ~15 fps target; the next frame is scheduled after the
 
 class WeatherWindow:
     def __init__(self, master):
-        self.top = tk.Toplevel(master)
+        self.top = tk.Toplevel(master, class_="Hrdps-weather")
         self.top.title("Météo — HRDPS")
+        try:                                             # X11/XWayland: tiling WMs float dialogs by default
+            self.top.attributes("-type", "dialog")
+        except tk.TclError:
+            pass
         self.top.configure(bg="#1e1e2e")
         sw, sh = self.top.winfo_screenwidth(), self.top.winfo_screenheight()
         self.scale = max(0.5, min(sw * 0.92 / wv.W, sh * 0.86 / wv.H, 1.25))
@@ -175,7 +179,7 @@ class WeatherWindow:
 
 def run_standalone():
     """Open the window alone (no tray) — `hrdps-weather popup --tk`."""
-    root = tk.Tk()
+    root = tk.Tk(className="hrdps-weather")
     root.withdraw()
     win = WeatherWindow(root)
     win.top.bind("<Destroy>", lambda e: root.quit() if e.widget is win.top else None)

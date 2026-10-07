@@ -254,6 +254,8 @@ def refresh(force=False, maps=True):
 
 def ensure_fresh(force=False):
     """Spawn a detached refresh when the cache is missing or a new run may exist."""
+    if os.environ.get("HRDPS_NO_REFRESH"):                  # CI / smoke tests: stay offline
+        return
     st = _state()
     stale = (not _series_path().exists()) or (time.time() - st.get("checked", 0) > CHECK_EVERY)
     if not (force or stale):

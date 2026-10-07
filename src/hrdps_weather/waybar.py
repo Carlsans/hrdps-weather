@@ -10,8 +10,9 @@ Never blocks on the network: it reads the cache and spawns a detached refresh
 when a new model run may be available (see hrdps.py).
 """
 import json
+import re
 from datetime import timedelta
-from xml.sax.saxutils import escape
+from xml.sax.saxutils import escape, unescape
 
 from . import hrdps
 
@@ -110,9 +111,33 @@ def main():
         return {"text": "⏳ météo", "tooltip": "Téléchargement des données HRDPS (≈1 min)…", "class": "weather"}
     return build(d)
 
-def print_json():
+def _plain(markup):
+    return unescape(re.sub(r"<[^>]+>", "", markup))
+
+
+def print_status(fmt="waybar"):
+    """Print the status in the format a given bar understands.
+
+    waybar / i3status-rs : JSON · plain : one line · polybar : one line with a colour tag on alerts ·
+    i3blocks : full text, short text, colour (the three lines i3blocks expects)."""
     try:
         out = main()
     except Exception as e:
-        out = {"text": "⚠️ météo", "tooltip": escape(f"{type(e).__name__}: {e}")}
-    print(json.dumps(out))
+        out = {"text": "⚠️ météo", "tooltip": escape(f"{type(e).__name__}: {e}"), "class": "weather"}
+    text, alert = out["text"], "alert" in out.get("class", "")
+    short = text.split("   |   ")[0].replace("  ⚠", "")
+    if fmt == "waybar":
+        print(json.dumps(out))
+    elif fmt == "plain":
+        print(text)
+    elif fmt == "polybar":
+        print(text.replace("⚠", "%{F#fab387}⚠%{F-}"))
+    elif fmt == "i3blocks":
+        print(text); print(short); print("#fab387" if alert else "")
+    elif fmt == "i3status-rs":
+        print(json.dumps({"icon": "weather_default", "state": "Warning" if alert else "Idle",
+                          "text": text, "short_text": short}))
+
+
+def print_json():
+    print_status("waybar")

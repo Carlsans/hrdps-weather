@@ -9,6 +9,7 @@ commandes :
   tray            icône de zone de notification + fenêtre (--minimized : sans fenêtre au démarrage)
   popup           fenêtre météo (GTK4 si disponible, sinon Tk) ; --kill pour fermer ; --tk pour forcer Tk
   waybar          sortie JSON pour un module waybar custom (Linux)
+  status          état météo pour d'autres barres : --format plain|polybar|i3blocks|i3status-rs|waybar
   refresh         télécharge le dernier run HRDPS (--force pour retélécharger)
   png FICHIER [couche] [heures]   image fixe du tableau de bord (couche : rt|tt|ws|nt)
   config          affiche (et crée au besoin) le fichier de configuration
@@ -19,11 +20,13 @@ commandes :
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="hrdps-weather", description="Météo HRDPS (Environnement Canada, 2,5 km)",
                                  epilog=HELP, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["tray", "popup", "waybar", "refresh", "png", "config", "selftest"])
+    ap.add_argument("command", choices=["tray", "popup", "waybar", "status", "refresh", "png", "config", "selftest"])
     ap.add_argument("args", nargs="*")
     ap.add_argument("--kill", action="store_true")
     ap.add_argument("--tk", action="store_true")
     ap.add_argument("--force", action="store_true")
+    ap.add_argument("--format", choices=["waybar", "plain", "polybar", "i3blocks", "i3status-rs"], default="waybar",
+                    help="status : format de sortie pour la barre d'état")
     ap.add_argument("--minimized", action="store_true", help="tray : démarrer sans fenêtre ni notification")
     ap.add_argument("--version", action="version", version=__version__)
     a = ap.parse_args(argv)
@@ -36,9 +39,9 @@ def main(argv=None):
     elif a.command == "refresh":
         from . import hrdps
         hrdps.refresh(force=a.force)
-    elif a.command == "waybar":
+    elif a.command in ("waybar", "status"):
         from . import waybar
-        waybar.print_json()
+        waybar.print_status("waybar" if a.command == "waybar" else a.format)
     elif a.command == "png":
         from . import hrdps, view
         if not a.args:

@@ -1,0 +1,106 @@
+name: Linux build
+
+# Native builds on Ubuntu 22.04 (glibc 2.35, so the binary also runs on newer systems) for x86_64 and
+# aarch64 (GitHub's arm runner — no qemu). On a tag push (v*) the binaries and SHA256SUMS-linux.txt are
+# attached to that tag's release. workflow_dispatch builds and uploads artifacts without releasing.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-22.04,     arch: x86_64 }
+          - { runner: ubuntu-22.04-arm, arch: aarch64 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: System packages (cairo headers for pycairo, Tk runtime, Xvfb, a font)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libcairo2-dev pkg-config build-essential \
+            python3-tk xvfb xauth fonts-dejavu-core fontconfig
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[build,test]"
+
+      - name: Tests (Python 3.10)
+        run: xvfb-run -a python -m pytest -q
+
+      - name: Build
+        run: pyinstaller packaging/hrdps-weather-linux.spec --clean --noconfirm
+
+      - name: Smoke-test the binary
+        env:
+          HRDPS_NO_REFRESH: "1"
+        run: |
+          ./dist/hrdps-weather --version
+          ./dist/hrdps-weather selftest | tee selftest.out
+          grep -q "render=ok" selftest.out
+          xvfb-run -a ./dist/hrdps-weather popup --tk & PID=$!
+          sleep 6
+          kill -0 $PID && echo "window still running after 6 s" && kill $PID
+
+      - name: Name the asset and hash it
+        run: |
+          mkdir -p out
+          cp dist/hrdps-weather out/hrdps-weather-linux-${{ matrix.arch }}
+          (cd out && sha256sum hrdps-weather-linux-${{ matrix.arch }} > sums-${{ matrix.arch }}.txt)
+          cat out/sums-${{ matrix.arch }}.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}
+          path: out/*
+
+  distros:
+    # The x86_64 binary on other distributions (Ubuntu 22.04/24.04, Debian 12, Fedora, Arch).
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-x86_64
+          path: bin
+      - run: chmod +x bin/hrdps-weather-linux-x86_64 && packaging/test-docker.sh bin/hrdps-weather-linux-x86_64
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, distros]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: linux-*
+          merge-multiple: true
+          path: out
+      - name: Combine checksums
+        run: |
+          cd out
+          cat sums-x86_64.txt sums-aarch64.txt > SHA256SUMS-linux.txt
+          rm sums-*.txt
+          cat SHA256SUMS-linux.txt
+      - name: Attach to the release and merge the notes
+        run: |
+          gh release view "${{ github.ref_name }}" >/dev/null 2>&1 || gh release create "${{ github.ref_name }}" --title "${{ github.ref_name }}" --notes ""
+          gh release upload "${{ github.ref_name }}" out/hrdps-weather-linux-x86_64 out/hrdps-weather-linux-aarch64 out/SHA256SUMS-linux.txt --clobber
+          python packaging/release-notes.py "${{ github.ref_name }}" linux out/SHA256SUMS-linux.txt

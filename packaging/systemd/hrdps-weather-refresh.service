@@ -1,0 +1,6 @@
+[Unit]
+Description=Refresh the HRDPS weather cache (hrdps-weather)
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/hrdps-weather refresh

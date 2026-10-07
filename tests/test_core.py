@@ -76,3 +76,20 @@ def test_tray_open_request_roundtrip(tmp_path, monkeypatch):
 def test_autostart_is_minimized():
     from hrdps_weather import tray
     assert tray.autostart_command().endswith("tray --minimized")
+
+
+@pytest.mark.parametrize("fmt", ["waybar", "plain", "polybar", "i3blocks", "i3status-rs"])
+def test_status_formats(fmt, capsys, monkeypatch, data):
+    import json
+    from hrdps_weather import waybar
+    monkeypatch.setattr(hrdps, "ensure_fresh", lambda force=False: None)
+    monkeypatch.setattr(hrdps, "load", lambda: data)
+    waybar.print_status(fmt)
+    out = capsys.readouterr().out.strip().splitlines()
+    if fmt in ("waybar", "i3status-rs"):
+        d = json.loads(out[0])
+        assert d["text"] if fmt == "i3status-rs" else d["tooltip"]
+    elif fmt == "i3blocks":
+        assert len(out) == 3 and out[0] and out[1]
+    else:
+        assert out and "°" in out[0]

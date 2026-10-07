@@ -4,7 +4,7 @@ Météo **100 % HRDPS** (Système à haute résolution de prévision déterminis
 climatique Canada, 2,5 km, 48 h) : carte animée (précipitations, température, vent, nuages), graphiques
 synchronisés, alertes et détails heure par heure.
 
-- **Linux** : module [waybar](https://github.com/Alexays/Waybar) + fenêtre GTK4.
+- **Linux** : module [waybar](https://github.com/Alexays/Waybar) (et i3blocks, polybar, i3status-rust…) + fenêtre ; binaire prêt à l'emploi.
 - **Windows** : icône dans la zone de notification (température sur l'icône) + fenêtre complète au clic.
 
 ## Installation
@@ -54,14 +54,28 @@ hrdps-weather-tray          # lance l'icône (aucune fenêtre de console)
 
 ### Linux
 
-Paquets système (exemple Arch) : `python-cairo python-gobject gtk4 python-pillow python-numpy`.
+**Option 1 — binaire (le plus simple)**, x86_64 et aarch64, construit sur Ubuntu 22.04 :
 
 ```bash
-pip install --user --break-system-packages git+https://github.com/Carlsans/hrdps-weather   # ou un venv --system-site-packages
-hrdps-weather config
+curl -fsSL https://raw.githubusercontent.com/Carlsans/hrdps-weather/main/install.sh | bash
+hrdps-weather config        # fichier de configuration (votre position)
+hrdps-weather popup         # ou « Météo HRDPS » dans le menu des applications
 ```
 
-Module waybar (`~/.config/waybar/config.jsonc`) :
+Le script vérifie le SHA-256 du binaire, installe dans `~/.local/bin` sans `sudo`, et se désinstalle avec
+`--uninstall`. Barres d'état prises en charge — **waybar** (Sway, Hyprland, niri, river…), **i3blocks**,
+**polybar**, **i3status-rust**, texte brut pour yambar/eww/etc. — et règles de fenêtre flottante pour Sway, i3,
+Hyprland, niri, bspwm, KDE : voir [docs/linux.md](docs/linux.md).
+
+**Option 2 — depuis les sources** (fenêtre GTK4 native Wayland). Paquets système (exemple Arch) :
+`python-cairo python-gobject gtk4 python-pillow python-numpy` ; puis dans un venv qui voit les paquets système :
+
+```bash
+python -m venv --system-site-packages ~/.local/share/hrdps-weather/venv
+~/.local/share/hrdps-weather/venv/bin/pip install git+https://github.com/Carlsans/hrdps-weather
+```
+
+Module waybar (`~/.config/waybar/config.jsonc`) — avec le binaire, remplacez le chemin par `hrdps-weather` :
 
 ```jsonc
 "custom/weather": {

@@ -1,8 +1,12 @@
 """User configuration and per-OS directories (Linux, macOS, Windows)."""
 import os
 import sys
-import tomllib
 from pathlib import Path
+
+try:
+    import tomllib
+except ModuleNotFoundError:          # Python 3.10
+    import tomli as tomllib
 
 APP = "hrdps-weather"
 
