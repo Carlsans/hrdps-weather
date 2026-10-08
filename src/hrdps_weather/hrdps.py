@@ -102,6 +102,18 @@ def _fetch_series(ref):
     jobs = [(k, i) for k in POINT_LAYERS for i in range(len(times))]
     with ThreadPoolExecutor(12) as ex:
         res = list(ex.map(lambda j: _feature(POINT_LAYERS[j[0]], times[j[1]]), jobs))
+    # A failed request (network blip, 5xx) comes back as None; retry those cells before giving up on them.
+    # Cells that stay None are interpolated by Data (see _fill). Some are legitimately None (e.g. the first
+    # hour of the WEonG layers, which start one hour after the run), so the retry is cheap and bounded.
+    for _ in range(2):
+        todo = [n for n, r in enumerate(res) if r is None]
+        if not todo:
+            break
+        time.sleep(2)
+        with ThreadPoolExecutor(6) as ex:
+            again = list(ex.map(lambda n: _feature(POINT_LAYERS[jobs[n][0]], times[jobs[n][1]]), todo))
+        for n, r in zip(todo, again):
+            res[n] = r
     series = {k: [None] * len(times) for k in POINT_LAYERS}
     labels = {k: [None] * len(times) for k in POINT_LAYERS}
     for (k, i), r in zip(jobs, res):
@@ -313,6 +325,26 @@ def sun_elevation(utc):
     la = math.radians(LAT)
     return math.degrees(math.asin(math.sin(la) * math.sin(decl) + math.cos(la) * math.cos(decl) * math.cos(ha)))
 
+def _fill(vals):
+    """Fill gaps of a continuous series: linear interpolation inside, nearest value at the edges."""
+    known = [i for i, v in enumerate(vals) if v is not None]
+    if not known or len(known) == len(vals):
+        return vals
+    out = list(vals)
+    for i, v in enumerate(vals):
+        if v is not None:
+            continue
+        lo = max((k for k in known if k < i), default=None)
+        hi = min((k for k in known if k > i), default=None)
+        if lo is None:
+            out[i] = vals[hi]
+        elif hi is None:
+            out[i] = vals[lo]
+        else:
+            out[i] = vals[lo] + (vals[hi] - vals[lo]) * (i - lo) / (hi - lo)
+    return out
+
+
 class Data:
     """Hourly series at the configured point; index 0 = run start (UTC)."""
     def __init__(self, raw):
@@ -324,13 +356,14 @@ class Data:
         s, self.lab = raw["series"], raw["labels"]
         f = lambda k, d=None: [v if v is not None else d for v in s[k]]
         kmh = lambda k: [v * 3.6 if v is not None else None for v in s[k]]
-        self.tt, self.td, self.hr, self.re_ = f("tt"), f("td"), f("hr"), f("re")
+        c = lambda k: _fill(f(k))                       # continuous series: gaps are interpolated
+        self.tt, self.td, self.hr, self.re_ = c("tt"), c("td"), c("hr"), c("re")
         self.hmx, self.utci = f("hmx"), f("utci")
-        self.ws, self.wd = kmh("ws"), f("wd")                                  # km/h, °
+        self.ws, self.wd = _fill(kmh("ws")), c("wd")                           # km/h, °
         # GeoMet leaves the gust layer empty when gusts do not exceed the mean wind
         self.gust = [max(g, w) if g is not None and w is not None else w for g, w in zip(kmh("wgx"), self.ws)]
-        self.slp  = [v / 100 if v is not None else None for v in s["slp"]]     # hPa
-        self.nt, self.uv, self.pbl, self.cape = f("nt"), f("uv", 0), f("pbl"), f("cape", 0)
+        self.slp  = _fill([v / 100 if v is not None else None for v in s["slp"]])   # hPa
+        self.nt, self.uv, self.pbl, self.cape = c("nt"), f("uv", 0), c("pbl"), f("cape", 0)
         self.sd   = [v * 100 if v is not None else 0 for v in s["sd"]]         # cm
         self.pop, self.snowlvl, self.tsprob = f("pop", 0), f("snowlvl"), f("tsprob", 0)
         self.fogvis = f("fogvis")

@@ -240,9 +240,21 @@ class View:
         self.hits = []
         cr.save(); cr.scale(w / W, h / H)
         cr.set_source_rgb(*BG); cr.paint()
-        self.draw_header(cr); self.draw_map(cr); self.draw_controls(cr)
-        self.draw_charts(cr); self.draw_details(cr)
+        for section in (self.draw_header, self.draw_map, self.draw_controls, self.draw_charts, self.draw_details):
+            try:
+                section(cr)
+            except Exception as e:                         # never leave a half-drawn window without a reason
+                self._report(cr, section.__name__, e)
         cr.restore()
+
+    def _report(self, cr, name, exc):
+        import traceback
+        key = (name, repr(exc))
+        if key != getattr(self, "_last_error", None):      # log once per distinct error, not every frame
+            self._last_error = key
+            traceback.print_exc()
+        self.errors = getattr(self, "errors", 0) + 1
+        text(cr, f"⚠ erreur d'affichage ({name}): {type(exc).__name__}: {exc}"[:160], M, H - 22 - 14 * (self.errors % 3), 11, RED, True)
 
     # header --------------------------------------------------------------------
     def draw_header(self, cr):

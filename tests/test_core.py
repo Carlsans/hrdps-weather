@@ -93,3 +93,25 @@ def test_status_formats(fmt, capsys, monkeypatch, data):
         assert len(out) == 3 and out[0] and out[1]
     else:
         assert out and "°" in out[0]
+
+
+def test_gaps_are_interpolated_not_fatal(data, tmp_path):
+    """A failed request leaves a hole in the series: charts must still render (regression: TypeError on max())."""
+    import copy
+    from hrdps_weather import view
+    raw = copy.deepcopy(data.raw)
+    for k in ("tt", "td", "hr", "ws", "wd", "slp", "nt"):
+        raw["series"][k][5] = None
+        raw["series"][k][0] = None
+        raw["series"][k][-1] = None
+    d = hrdps.Data(raw)
+    assert all(v is not None for v in d.tt + d.td + d.hr + d.ws + d.wd + d.slp + d.nt)
+    assert min(d.tt[4], d.tt[6]) <= d.tt[5] <= max(d.tt[4], d.tt[6])
+    out = tmp_path / "gap.png"
+    view.render_png(str(out), d, "rt", 0)
+    assert out.stat().st_size > 20_000
+
+
+def test_fill_edges():
+    assert hrdps._fill([None, 2.0, None, 4.0, None]) == [2.0, 2.0, 3.0, 4.0, 4.0]
+    assert hrdps._fill([None, None]) == [None, None]
