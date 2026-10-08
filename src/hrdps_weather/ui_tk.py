@@ -16,12 +16,13 @@ from PIL import Image, ImageTk
 from . import hrdps
 from . import view as wv
 from .tiles import TileCache
+from . import update
 
 FRAME_MS = 66            # ~15 fps target; the next frame is scheduled after the render
 
 
 class WeatherWindow:
-    def __init__(self, master):
+    def __init__(self, master, updater=None):
         self.top = tk.Toplevel(master, class_="Hrdps-weather")
         self.top.title("Météo — HRDPS")
         try:                                             # X11/XWayland: tiling WMs float dialogs by default
@@ -40,6 +41,11 @@ class WeatherWindow:
         self.loading = False
         self.drag = None
         self._press = (0, 0)
+        self.updater = updater
+        if updater is None:                                  # standalone window: own updater (off by default)
+            self.updater = update.Updater()
+            self.updater.start()
+        self._msg = None
         self.tiles = TileCache(hrdps.CACHE, network=not os.environ.get("HRDPS_NO_REFRESH"))
         self._photo = None
         self._dirty = True
@@ -69,6 +75,7 @@ class WeatherWindow:
         d = hrdps.load()
         if d is not None:
             self.view = wv.View(d, self.tiles, prefetch_radar=self.tiles.network)
+            self.view.updater = self.updater
             self.view.status = "Cartes en téléchargement…"
 
     def _start_maps(self):
@@ -96,6 +103,8 @@ class WeatherWindow:
                 self._start_maps()
             self.view.tick(t0 - self._last)
         self._last = t0
+        if self.updater.message != self._msg:
+            self._msg, self._dirty = self.updater.message, True
         if self.view is None or self.view.playing or self.view.poll() or self._dirty:
             self._dirty = False
             self._render()
@@ -145,6 +154,8 @@ class WeatherWindow:
             v.playing = not v.playing
         elif tag == "speed":
             v.speed = {2.0: 4.0, 4.0: 8.0, 8.0: 1.0, 1.0: 2.0}.get(v.speed, 2.0)
+        elif tag == "update":
+            self.updater.install()
         elif tag == "zoom_in":
             v.zoom_by(+0.5)
         elif tag == "zoom_out":
@@ -213,6 +224,8 @@ class WeatherWindow:
             v.t = float(v.i0)
         elif k in ("1", "2", "3", "4", "5"):
             v.layer = wv.LAYERS[int(k) - 1][0]
+        elif k in ("u", "U"):
+            self.updater.install()
         elif k in ("plus", "equal", "KP_Add"):
             v.zoom_by(+0.5)
         elif k in ("minus", "KP_Subtract"):

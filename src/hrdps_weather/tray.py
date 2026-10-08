@@ -18,6 +18,7 @@ import tkinter as tk
 from PIL import Image, ImageDraw, ImageFont
 
 from . import hrdps
+from . import update as upd
 
 REFRESH_EVERY = 300           # seconds between tray updates (the cache itself refreshes per model run)
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
@@ -114,6 +115,21 @@ def summary(d):
     return s[:127]                                              # Windows tooltip limit
 
 
+def _say(icon, message, title="hrdps-weather"):
+    try:
+        icon.notify(message, title)
+    except Exception:
+        pass                                                         # notifications are best-effort
+
+
+def _notify_update(icon, u):
+    """Tell the user about a release once per version."""
+    if icon is None or upd._load_state().get("notified") == u.version:
+        return
+    upd._save_state(notified=u.version)
+    _say(icon, f"Version {u.version} disponible." + (" Menu de l'icône → Mises à jour." if upd.mode() != "auto" else ""))
+
+
 def _notify(icon):
     try:
         icon.notify("L'icône météo est dans la zone de notification (cliquez sur ^ si elle est masquée). "
@@ -143,9 +159,9 @@ def run(minimized=False):
         if w is not None and w.alive:
             w.top.deiconify(); w.top.lift(); w.top.focus_force()
         else:
-            state["win"] = WeatherWindow(root)
+            state["win"] = WeatherWindow(root, updater)
 
-    def update(icon):
+    def refresh_icon(icon):
         hrdps.ensure_fresh()
         d = hrdps.load()
         if d is None:
@@ -157,13 +173,46 @@ def run(minimized=False):
     def toggle_autostart(icon, item):
         set_autostart(not autostart_enabled())
 
+    updater = upd.Updater()
+    updater.on_found = lambda u: _notify_update(icon_ref[0], u)
+    icon_ref = [None]
+
+    def pick_mode(m):
+        def action(icon, item):
+            upd.set_mode(m)
+            updater.start()                                         # begins checking now if it was off
+        return action
+
+    def check_now(icon, item):
+        def work():
+            updater.refresh(force=True)
+            if updater.info is None:
+                _say(icon, f"Vous avez la dernière version ({upd.__version__}).")
+        threading.Thread(target=work, daemon=True).start()
+
+    update_menu = pystray.Menu(
+        pystray.MenuItem("Désactivées", pick_mode("off"), checked=lambda it: upd.mode() == "off", radio=True),
+        pystray.MenuItem("Me prévenir", pick_mode("notify"), checked=lambda it: upd.mode() == "notify", radio=True),
+        pystray.MenuItem("Automatiques", pick_mode("auto"), checked=lambda it: upd.mode() == "auto", radio=True),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem("Vérifier maintenant", check_now),
+        pystray.MenuItem(lambda it: f"Installer la version {updater.info.version}",
+                         lambda i, it: updater.install(),
+                         visible=lambda it: bool(updater.info and upd.can_self_update() and not updater.busy)))
+
     menu = [pystray.MenuItem("Ouvrir la météo", lambda i, it: q.put("open"), default=True),
-            pystray.MenuItem("Actualiser maintenant", lambda i, it: (hrdps.ensure_fresh(force=True), q.put("update")))]
+            pystray.MenuItem("Actualiser maintenant", lambda i, it: (hrdps.ensure_fresh(force=True), q.put("update"))),
+            pystray.MenuItem("Mises à jour", update_menu)]
     if sys.platform == "win32":
         menu.append(pystray.MenuItem("Démarrer avec Windows", toggle_autostart, checked=lambda it: autostart_enabled()))
     menu.append(pystray.MenuItem("Quitter", lambda i, it: q.put("quit")))
     icon = pystray.Icon("hrdps-weather", make_icon("…"), "HRDPS météo", pystray.Menu(*menu))
+    icon_ref[0] = icon
     icon.run_detached()
+    updater.start()                                                 # no-op while updates are off (the default)
+    notice = upd.consume_installed_notice()                         # "updated to X", once, after a self-update
+    if notice:
+        threading.Timer(3.0, lambda: _say(icon, notice)).start()
 
     if not minimized:
         # Windows hides new tray icons under the "^" overflow, which makes a healthy app look dead:
@@ -176,7 +225,7 @@ def run(minimized=False):
     def updater():
         while not stop.is_set():
             try:
-                update(icon)
+                refresh_icon(icon)
             except Exception:
                 pass
             stop.wait(REFRESH_EVERY)
@@ -184,6 +233,8 @@ def run(minimized=False):
 
     def poll():
         try:
+            if updater.needs_exit:                                  # the installer is replacing this program
+                stop.set(); icon.stop(); root.quit(); return
             if consume_open_request():
                 open_window()
             while True:
@@ -191,7 +242,7 @@ def run(minimized=False):
                 if cmd == "open":
                     open_window()
                 elif cmd == "update":
-                    threading.Thread(target=update, args=(icon,), daemon=True).start()
+                    threading.Thread(target=refresh_icon, args=(icon,), daemon=True).start()
                 elif cmd == "quit":
                     stop.set(); icon.stop(); root.quit(); return
         except queue.Empty:

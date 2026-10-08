@@ -99,6 +99,12 @@ jobs:
           Get-Content SHA256SUMS.txt
           Pop-Location
 
+      - name: Sign the checksums (the in-app updater only trusts signed releases)
+        shell: pwsh
+        env:
+          UPDATE_SIGNING_SEED: ${{ secrets.UPDATE_SIGNING_SEED }}
+        run: python packaging/sign.py dist/SHA256SUMS.txt
+
       - uses: actions/upload-artifact@v4
         with:
           name: hrdps-weather-windows
@@ -106,6 +112,7 @@ jobs:
             dist/hrdps-weather-setup-x86_64.exe
             dist/hrdps-weather-windows-x86_64.zip
             dist/SHA256SUMS.txt
+            dist/SHA256SUMS.txt.sig
 
       - name: Attach to the release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -116,5 +123,5 @@ jobs:
           $tag = "${{ github.ref_name }}"
           gh release view $tag 2>$null
           if ($LASTEXITCODE -ne 0) { gh release create $tag --title $tag --notes "" }
-          gh release upload $tag dist/hrdps-weather-setup-x86_64.exe dist/hrdps-weather-windows-x86_64.zip dist/SHA256SUMS.txt --clobber
+          gh release upload $tag dist/hrdps-weather-setup-x86_64.exe dist/hrdps-weather-windows-x86_64.zip dist/SHA256SUMS.txt dist/SHA256SUMS.txt.sig --clobber
           python packaging/release-notes.py $tag windows dist/SHA256SUMS.txt

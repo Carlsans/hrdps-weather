@@ -132,13 +132,45 @@ images). Merci de ne pas réduire ces délais.
 
 Cache : `%LOCALAPPDATA%\hrdps-weather\Cache` (Windows) ou `~/.cache/hrdps-weather` (Linux).
 
+## Mises à jour (facultatives)
+
+**Désactivées par défaut** : tant que vous ne les activez pas, le programme ne contacte aucun hôte autre que ceux du
+tableau ci-dessus. Trois modes :
+
+| Mode | Comportement |
+| --- | --- |
+| `off` | aucune vérification (défaut) |
+| `notify` | une vérification par jour ; un bandeau (fenêtre : touche **U** ou clic) et une notification (icône) vous préviennent, vous installez quand vous voulez |
+| `auto` | une vérification par jour, puis téléchargement, vérification et installation automatiques |
+
+Choisir le mode : menu de l'icône → **Mises à jour** (Windows), ou `hrdps-weather update --mode notify|auto|off`, ou
+`update = "auto"` dans `config.toml`. `hrdps-weather update --check` vérifie tout de suite, `--install` installe.
+
+**Vérification stricte** : chaque version publie ses empreintes SHA-256 (`SHA256SUMS*.txt`) avec une **signature
+Ed25519** (`.sig`) faite par la CI avec la clé de publication du projet ; la clé publique est intégrée au
+programme. Rien n'est installé si la signature est invalide ou si l'empreinte du fichier téléchargé ne correspond
+pas. Hôtes contactés quand les mises à jour sont activées : `api.github.com` (numéro de la dernière version) et
+`github.com` / `objects.githubusercontent.com` (téléchargement) — pas d'autres.
+
+**Selon le type d'installation :**
+
+- *Windows, installateur* : l'installateur vérifié est lancé en mode silencieux (par utilisateur, sans droits
+  administrateur) ; il ferme l'icône, remplace les fichiers et la relance discrètement, avec une notification.
+- *Linux, binaire de `install.sh`* : le fichier est remplacé sur place ; l'ancienne version reste à côté sous
+  `hrdps-weather.old`. Relancez le programme pour utiliser la nouvelle version.
+- *Archive portable Windows, installation `pip`/sources, dossier non modifiable* : le programme vous prévient
+  seulement et indique comment mettre à jour (il ne modifie jamais ces installations).
+
+Le journal est dans le dossier de cache (`update.log`).
+
 ## Ce que le programme ne fait pas
 
 - aucun droit administrateur, aucun service, aucune tâche planifiée, aucune règle de pare-feu (il n'écoute sur
   aucun port) ;
 - aucun démarrage automatique par défaut — l'entrée de menu *Démarrer avec Windows* est facultative et ne fait
   qu'ajouter (ou retirer) une valeur `HRDPSWeather` sous `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` ;
-- aucun téléchargement ni exécution de code, aucune obfuscation, aucun accès aux fichiers hors de ses dossiers de
+- aucun téléchargement ni exécution de code **sauf si vous activez les mises à jour** (voir ci-dessus : signature et
+  empreinte vérifiées avant toute installation), aucune obfuscation, aucun accès aux fichiers hors de ses dossiers de
   configuration et de cache.
 
 Aucun éditeur ne peut garantir qu'un logiciel ne sera jamais signalé par un antivirus ; le code est entièrement

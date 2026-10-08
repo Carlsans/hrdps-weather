@@ -199,6 +199,7 @@ class View:
     def __init__(self, data, tiles=None, prefetch_radar=False):
         self.d = data
         self.prefetch_radar = prefetch_radar                       # warm the radar in the background (UI only)
+        self.updater = None                                        # update.Updater: shows an update banner
         self.i0, self.i1 = data.now_index(), data.n - 1
         self.t = float(self.i0)
         self.layer, self.playing, self.speed = "rt", True, 2.0       # speed: model hours per second
@@ -385,6 +386,12 @@ class View:
              W - M, 46, 13, MUTED, False, "r")
         text(cr, "Environnement Canada · GeoMet", W - M, 66, 11, MUTED, False, "r")
         text(cr, hrdps.next_run_text(d.ref), W - M, 84, 12, SUBTLE, True, "r")
+        up = self.updater
+        if up is not None and up.message:                          # update banner (click or press U to install)
+            lw = text(cr, up.message, W - M - 12, 101, 12, PANEL, True, "r")
+            cr.set_source_rgb(*PEACH); rrect(cr, W - M - lw - 24, 98, lw + 24, 18, 9); cr.fill()
+            text(cr, up.message, W - M - 12, 100, 12, PANEL, True, "r")
+            self.hits.append(((W - M - lw - 24, 98, lw + 24, 18), "update", None))
 
     # map -----------------------------------------------------------------------
     def draw_map(self, cr):

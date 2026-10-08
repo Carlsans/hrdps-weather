@@ -40,6 +40,11 @@ BrandingText    "${APPNAME} ${VERSION}"
 
 Section "hrdps-weather" SecMain
   SectionIn RO
+  ; An update replaces a running program: stop the tray app (and any background refresh) first so that
+  ; none of its files are locked. A no-op on a first install.
+  nsExec::Exec 'taskkill /F /IM hrdps-weather-tray.exe'
+  nsExec::Exec 'taskkill /F /IM hrdps-weather.exe'
+  Sleep 1500
   SetOutPath "$INSTDIR"
   ; onedir build: both executables plus the shared _internal\ runtime must be installed together.
   File /r "..\dist\hrdps-weather\*.*"
@@ -57,6 +62,12 @@ Section "hrdps-weather" SecMain
   WriteRegStr HKCU "${REGKEY}" "UninstallString" '"$INSTDIR\uninstall.exe"'
   WriteRegDWORD HKCU "${REGKEY}" "NoModify" 1
   WriteRegDWORD HKCU "${REGKEY}" "NoRepair" 1
+
+  ; A silent install is what the in-app updater runs (hrdps-weather-setup.exe /S): bring the tray app back,
+  ; quietly, so the update is invisible apart from one notification. Interactive installs use the finish page.
+  IfSilent 0 notsilent
+    Exec '"$INSTDIR\hrdps-weather-tray.exe" tray --minimized'
+  notsilent:
 SectionEnd
 
 Section "Uninstall"

@@ -15,6 +15,7 @@ DEFAULTS = {
     "longitude": -71.2080,
     "location": "Québec",
     "timezone": "America/Toronto",
+    "update": "off",              # off | notify | auto — see the README ("Mises à jour")
 }
 
 # HRDPS continental domain (approx.): anything outside has no data.
@@ -26,6 +27,7 @@ latitude  = 46.8139
 longitude = -71.2080
 location  = "Québec"            # label shown in the interface
 timezone  = "America/Toronto"   # IANA name, used to show local hours
+update    = "off"               # off | notify | auto : mises à jour depuis GitHub (désactivées par défaut)
 """
 
 

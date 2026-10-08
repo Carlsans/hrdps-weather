@@ -15,6 +15,7 @@ from pathlib import Path
 
 from . import hrdps
 from .tiles import TileCache
+from . import update
 
 PIDFILE = Path(tempfile.gettempdir()) / "waybar-weather-popup.pid"
 
@@ -36,6 +37,8 @@ def run_gtk():
     app = Gtk.Application(application_id="io.github.carlsans.hrdps-weather")
     state = {"view": None, "loading": False, "drag": None, "area": None}
 
+    updater = update.Updater()
+    updater.start()                                  # no-op unless updates are enabled (off by default)
     tiles = TileCache(hrdps.CACHE, network=not os.environ.get("HRDPS_NO_REFRESH"))
 
     def make_view():
@@ -43,6 +46,7 @@ def run_gtk():
         if d is None:
             return None
         v = wv.View(d, tiles, prefetch_radar=tiles.network)
+        v.updater = updater
         v.status = "Cartes en téléchargement…"
         return v
 
@@ -103,6 +107,8 @@ def run_gtk():
                 v.playing = not v.playing
             elif tag == "speed":
                 v.speed = {2.0: 4.0, 4.0: 8.0, 8.0: 1.0, 1.0: 2.0}.get(v.speed, 2.0)
+            elif tag == "update":
+                updater.install()
             elif tag == "zoom_in":
                 v.zoom_by(+0.5)
             elif tag == "zoom_out":
@@ -174,6 +180,8 @@ def run_gtk():
                 v.t = float(v.i0)
             elif name in ("1", "2", "3", "4", "5"):
                 v.layer = wv.LAYERS[int(name) - 1][0]
+            elif name in ("u", "U"):
+                updater.install()
             elif name in ("plus", "equal", "KP_Add"):
                 v.zoom_by(+0.5)
             elif name in ("minus", "KP_Subtract"):
@@ -196,8 +204,9 @@ def run_gtk():
                     start_maps()
                 if v.playing:
                     v.tick(0.033); redraw()
-                elif v.poll():
+                elif v.poll() or updater.message != state.get("msg"):
                     redraw()
+                state["msg"] = updater.message
             return True
         GLib.timeout_add(33, tick)
 

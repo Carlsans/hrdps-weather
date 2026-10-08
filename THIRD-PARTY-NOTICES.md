@@ -9,6 +9,7 @@ hrdps-weather is MIT-licensed. It uses the following components (and ships them 
 | [pycairo](https://pycairo.readthedocs.io) / [cairo](https://cairographics.org) | LGPL-2.1 / MPL-1.1 |
 | [pystray](https://github.com/moses-palmer/pystray) | LGPL-3.0 (Windows tray icon; dynamically imported, replaceable in the onedir build) |
 | [tzdata](https://pypi.org/project/tzdata/) | Apache-2.0 |
+| Ed25519 (RFC 8032), implémentation Python incluse (`ed25519.py`) | MIT (ce projet) |
 | [Python](https://www.python.org) (incl. Tcl/Tk) | PSF License |
 | [PyInstaller](https://pyinstaller.org) (build only) | GPL-2.0 with the bootloader exception |
 | PyGObject / GTK 4 / Pango (Linux only, system packages) | LGPL-2.1+ |

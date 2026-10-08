@@ -13,6 +13,7 @@ commandes :
   refresh         télécharge le dernier run HRDPS (--force pour retélécharger)
   png FICHIER [couche] [heures]   image fixe du tableau de bord (couche : rt|tt|ws|nt)
   config          affiche (et crée au besoin) le fichier de configuration
+  update          mises à jour : --mode off|notify|auto · --check · --install (désactivées par défaut)
   selftest        vérifie hors ligne que le rendu et les dépendances fonctionnent (utilisé par la CI)
 """
 
@@ -20,19 +21,24 @@ commandes :
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="hrdps-weather", description="Météo HRDPS (Environnement Canada, 2,5 km)",
                                  epilog=HELP, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["tray", "popup", "waybar", "status", "refresh", "png", "config", "selftest"])
+    ap.add_argument("command", choices=["tray", "popup", "waybar", "status", "refresh", "png", "config", "update", "selftest"])
     ap.add_argument("args", nargs="*")
     ap.add_argument("--kill", action="store_true")
     ap.add_argument("--tk", action="store_true")
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--format", choices=["waybar", "plain", "polybar", "i3blocks", "i3status-rs"], default="waybar",
                     help="status : format de sortie pour la barre d'état")
+    ap.add_argument("--mode", choices=["off", "notify", "auto"], help="update : choisir le mode de mise à jour")
+    ap.add_argument("--check", action="store_true", help="update : vérifier maintenant (sans attendre 24 h)")
+    ap.add_argument("--install", action="store_true", help="update : installer la nouvelle version maintenant")
     ap.add_argument("--minimized", action="store_true", help="tray : démarrer sans fenêtre ni notification")
     ap.add_argument("--version", action="version", version=__version__)
     a = ap.parse_args(argv)
 
     if a.command == "selftest":
         sys.exit(selftest())
+    if a.command == "update":
+        sys.exit(run_update(a))
     if a.command == "config":
         from . import config
         print(config.write_template())
@@ -78,6 +84,38 @@ def main(argv=None):
                 pass
         from . import tray
         tray.run(minimized=a.minimized)
+
+
+def run_update(a):
+    """`hrdps-weather update`: show/set the mode, check, and install when asked (or in auto mode)."""
+    from . import update as upd
+    if a.mode:
+        upd.set_mode(a.mode)
+        print(f"mises à jour : {a.mode}")
+    kind = upd.install_kind()
+    print(f"version {upd.__version__} · installation : {kind} · mode : {upd.mode()}")
+    if upd.mode() == "off" and not (a.check or a.install):
+        print("Les mises à jour sont désactivées (aucune requête vers GitHub). "
+              "Activez-les avec --mode notify ou --mode auto, ou vérifiez une fois avec --check.")
+        return 0
+    up = upd.check(force=a.check or a.install)
+    if up is None:
+        print("Vous avez la dernière version.")
+        return 0
+    print(f"Version {up.version} disponible : {up.url}")
+    if not upd.can_self_update(kind):
+        print(f"Cette installation ne se met pas à jour toute seule : {upd.how_to_update(kind)}.")
+        return 0
+    if a.install or upd.mode() == "auto":
+        try:
+            msg, _ = upd.apply(up, kind)
+        except upd.UpdateError as e:
+            print(f"Mise à jour impossible : {e}", file=sys.stderr)
+            return 1
+        print(msg)
+        return 0
+    print("Installez-la avec : hrdps-weather update --install")
+    return 0
 
 
 def selftest():

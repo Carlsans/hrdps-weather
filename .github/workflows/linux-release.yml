@@ -99,8 +99,12 @@ jobs:
           cat sums-x86_64.txt sums-aarch64.txt > SHA256SUMS-linux.txt
           rm sums-*.txt
           cat SHA256SUMS-linux.txt
+      - name: Sign the checksums (the in-app updater only trusts signed releases)
+        env:
+          UPDATE_SIGNING_SEED: ${{ secrets.UPDATE_SIGNING_SEED }}
+        run: python3 packaging/sign.py out/SHA256SUMS-linux.txt
       - name: Attach to the release and merge the notes
         run: |
           gh release view "${{ github.ref_name }}" >/dev/null 2>&1 || gh release create "${{ github.ref_name }}" --title "${{ github.ref_name }}" --notes ""
-          gh release upload "${{ github.ref_name }}" out/hrdps-weather-linux-x86_64 out/hrdps-weather-linux-aarch64 out/SHA256SUMS-linux.txt --clobber
+          gh release upload "${{ github.ref_name }}" out/hrdps-weather-linux-x86_64 out/hrdps-weather-linux-aarch64 out/SHA256SUMS-linux.txt out/SHA256SUMS-linux.txt.sig --clobber
           python packaging/release-notes.py "${{ github.ref_name }}" linux out/SHA256SUMS-linux.txt

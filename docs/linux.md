@@ -127,6 +127,12 @@ Sans module de barre (fenêtre seule), le rafraîchissement a lieu à l'ouvertur
 à jour en continu : `install.sh --systemd` active la minuterie utilisateur `hrdps-weather-refresh.timer`
 (vérification toutes les 30 min ; un téléchargement complet n'a lieu qu'à un nouveau run, 4 fois par jour).
 
+## Mises à jour
+
+Facultatives et désactivées par défaut : `hrdps-weather update --mode notify` (ou `auto`). Avec le binaire, `auto`
+remplace le fichier après vérification de la signature (ancienne version gardée en `hrdps-weather.old`). Sans barre
+d'état ni fenêtre ouverte, lancez `hrdps-weather update` depuis une minuterie systemd ou cron pour vérifier. Voir le README.
+
 ## Désinstaller
 
 `curl -fsSL https://raw.githubusercontent.com/Carlsans/hrdps-weather/main/install.sh | bash -s -- --uninstall`
