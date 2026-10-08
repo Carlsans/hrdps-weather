@@ -383,6 +383,7 @@ class View:
         text(cr, f"HRDPS 2,5 km · run {d.ref.strftime('%HZ')} ({hrdps.fr(rn, '%a %d %b %Hh')})",
              W - M, 46, 13, MUTED, False, "r")
         text(cr, "Environnement Canada · GeoMet", W - M, 66, 11, MUTED, False, "r")
+        text(cr, hrdps.next_run_text(d.ref), W - M, 84, 12, SUBTLE, True, "r")
 
     # map -----------------------------------------------------------------------
     def draw_map(self, cr):

@@ -264,7 +264,12 @@ def refresh(force=False, maps=True):
                 return                        # run still being published: keep old cache, retry later
             tmp = _series_path().with_suffix(".tmp")
             tmp.write_text(json.dumps(data), encoding="utf-8"); tmp.replace(_series_path())
-            _save_state(ref=data["ref"], checked=time.time())
+            lags = list(st.get("lags", []))
+            if st.get("ref") and st.get("ref") != data["ref"]:       # a *new* run was just picked up
+                lag = time.time() - ref.timestamp()
+                if MIN_LAG <= lag <= MAX_LAG:                        # ignore PC-was-off outliers
+                    lags = (lags + [lag])[-8:]
+            _save_state(ref=data["ref"], checked=time.time(), lags=lags)
         if maps:
             g = _fetch_maps(ref)
             if g:
@@ -299,6 +304,40 @@ def refresh_running():
         lock.release()
         return False
     return True
+
+# ── Next model run ───────────────────────────────────────────────────────────
+RUN_STEP = timedelta(hours=6)              # HRDPS runs at 00, 06, 12 and 18 UTC
+DEFAULT_LAG = 3 * 3600 + 10 * 60           # observed: a run is complete on GeoMet ≈ 3 h after its cycle time
+MIN_LAG, MAX_LAG = 2.5 * 3600, 4.5 * 3600
+_lag_cache = (0.0, DEFAULT_LAG)
+
+def run_lag():
+    """Typical delay (s) between a run's cycle time and its availability: median of the lags this installation
+    observed (kept in the state file), else the default."""
+    global _lag_cache
+    if time.time() - _lag_cache[0] > 30:
+        lags = sorted(_state().get("lags", []))
+        _lag_cache = (time.time(), lags[len(lags) // 2] if lags else DEFAULT_LAG)
+    return _lag_cache[1]
+
+def next_run(ref, now=None, lag=None):
+    """-> (next_cycle_utc, eta_utc, seconds_left) for the run following `ref`; seconds_left <= 0 means it is due
+    (publication in progress or about to be picked up)."""
+    now = now or datetime.now(timezone.utc)
+    lag = run_lag() if lag is None else lag
+    nxt = ref + RUN_STEP
+    eta = nxt + timedelta(seconds=lag)
+    return nxt, eta, (eta - now).total_seconds()
+
+def next_run_text(ref, now=None):
+    """One line for the UI, e.g. 'Prochain run 12Z : dans ~1 h 25 (vers 11h10)'."""
+    nxt, eta, left = next_run(ref, now)
+    cycle = nxt.strftime("%HZ")
+    if left <= 0:
+        return f"Run {cycle} attendu : publication en cours…"
+    mins = int(left // 60) + 1
+    span = f"{mins // 60} h {mins % 60:02d}" if mins >= 60 else f"{mins} min"
+    return f"Prochain run {cycle} : dans ~{span} (vers {fr(eta.astimezone(TZ), '%Hh%M')})"
 
 # ── Data access ──────────────────────────────────────────────────────────────
 # English class labels from GeoMet → French

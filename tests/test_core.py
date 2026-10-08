@@ -85,12 +85,12 @@ def test_status_formats(fmt, capsys, monkeypatch, data):
     monkeypatch.setattr(hrdps, "ensure_fresh", lambda force=False: None)
     monkeypatch.setattr(hrdps, "load", lambda: data)
     waybar.print_status(fmt)
-    out = capsys.readouterr().out.strip().splitlines()
+    out = capsys.readouterr().out.split("\n")[:-1]        # keep an empty colour line (no alert) for i3blocks
     if fmt in ("waybar", "i3status-rs"):
         d = json.loads(out[0])
         assert d["text"] if fmt == "i3status-rs" else d["tooltip"]
     elif fmt == "i3blocks":
-        assert len(out) == 3 and out[0] and out[1]
+        assert len(out) == 3 and out[0] and out[1] and out[2] in ("", "#fab387")
     else:
         assert out and "°" in out[0]
 
@@ -115,3 +115,26 @@ def test_gaps_are_interpolated_not_fatal(data, tmp_path):
 def test_fill_edges():
     assert hrdps._fill([None, 2.0, None, 4.0, None]) == [2.0, 2.0, 3.0, 4.0, 4.0]
     assert hrdps._fill([None, None]) == [None, None]
+
+
+def test_next_run_countdown():
+    from datetime import timedelta
+    ref = datetime(2026, 10, 8, 6, tzinfo=timezone.utc)
+    now = datetime(2026, 10, 8, 14, 0, tzinfo=timezone.utc)           # next cycle 12Z, available ≈ 15:10Z
+    nxt, eta, left = hrdps.next_run(ref, now, lag=3 * 3600 + 600)
+    assert nxt.hour == 12 and eta == datetime(2026, 10, 8, 15, 10, tzinfo=timezone.utc)
+    assert left == 4200
+    assert "dans ~1 h 10" in hrdps.next_run_text(ref, now) or "dans ~1 h 11" in hrdps.next_run_text(ref, now)
+    late = hrdps.next_run_text(ref, datetime(2026, 10, 8, 16, 0, tzinfo=timezone.utc))
+    assert "publication en cours" in late
+    soon = hrdps.next_run_text(ref, datetime(2026, 10, 8, 15, 0, tzinfo=timezone.utc))
+    assert "min" in soon and " h " not in soon
+
+
+def test_lag_median_from_state(tmp_path, monkeypatch):
+    monkeypatch.setattr(hrdps, "CACHE", tmp_path)
+    monkeypatch.setattr(hrdps, "_lag_cache", (0.0, hrdps.DEFAULT_LAG))
+    assert hrdps.run_lag() == hrdps.DEFAULT_LAG
+    hrdps._save_state(lags=[10000.0, 11000.0, 12000.0])
+    monkeypatch.setattr(hrdps, "_lag_cache", (0.0, hrdps.DEFAULT_LAG))
+    assert hrdps.run_lag() == 11000.0

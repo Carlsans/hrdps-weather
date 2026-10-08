@@ -101,7 +101,8 @@ def build(d):
           f"<span color='#89b4fa'>💧  {spark([d.pr[k] for k in rng], 0, 4)}</span>  Σ{sum(d.pr[k] for k in rng):.1f} mm",
           f"<span color='#89dceb'>💨  {spark([d.gust[k] for k in rng], 0, 80)}</span>  ≤{max(d.gust[k] for k in rng):.0f} km/h",
           "</tt>", "",
-          f"<span color='#6c7086'>HRDPS 2,5 km · run {d.ref.strftime('%HZ')} · clic : carte animée</span>"]
+          f"<span color='#6c7086'>HRDPS 2,5 km · run {d.ref.strftime('%HZ')} · {hrdps.next_run_text(d.ref)}</span>",
+          "<span color='#6c7086'>clic : carte animée et radar</span>"]
     return {"text": text, "tooltip": "\n".join(L), "class": "weather" + (" alert" if al else "")}
 
 def main():
