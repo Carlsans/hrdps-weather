@@ -15,7 +15,7 @@ hrdps-weather is MIT-licensed. It uses the following components (and ships them 
 
 Data and map sources:
 
-- Weather data: HRDPS, Environment and Climate Change Canada (Meteorological Service of Canada), served by MSC GeoMet.
+- Weather data: HRDPS forecasts and weather radar, Environment and Climate Change Canada (Meteorological Service of Canada), served by MSC GeoMet.
   Contains information licensed under the [Open Government Licence – Canada](https://open.canada.ca/en/open-government-licence-canada).
 - Base map tiles: © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors (ODbL), fetched with a
   descriptive User-Agent and cached on disk, in line with the OSM tile usage policy.

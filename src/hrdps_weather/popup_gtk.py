@@ -14,6 +14,7 @@ import os, signal, tempfile, threading
 from pathlib import Path
 
 from . import hrdps
+from .tiles import TileCache
 
 PIDFILE = Path(tempfile.gettempdir()) / "waybar-weather-popup.pid"
 
@@ -25,16 +26,6 @@ def kill_existing():
             pass
         PIDFILE.unlink(missing_ok=True)
 
-def load_maps_into(view):
-    """Heavy part (basemap download, reprojection) — runs in a worker thread."""
-    maps = hrdps.load_maps()
-    try:
-        base = hrdps.basemap()
-    except Exception:
-        base = None
-    if maps:
-        view.set_maps(maps, base)
-
 def run_gtk():
     import gi
     gi.require_version("Gtk", "4.0")
@@ -45,11 +36,13 @@ def run_gtk():
     app = Gtk.Application(application_id="io.github.carlsans.hrdps-weather")
     state = {"view": None, "loading": False, "drag": None, "area": None}
 
+    tiles = TileCache(hrdps.CACHE, network=not os.environ.get("HRDPS_NO_REFRESH"))
+
     def make_view():
         d = hrdps.load()
         if d is None:
             return None
-        v = wv.View(d)
+        v = wv.View(d, tiles)
         v.status = "Cartes en téléchargement…"
         return v
 
@@ -59,12 +52,12 @@ def run_gtk():
 
     def start_maps():
         v = state["view"]
-        if v is None or state["loading"] or v.proj is not None or not hrdps.maps_ready(v.d):
+        if v is None or state["loading"] or v.maps is not None or not hrdps.maps_ready(v.d):
             return
         state["loading"] = True
         def work():
             try:
-                load_maps_into(v)
+                v.set_maps(hrdps.load_maps())
             finally:
                 state["loading"] = False
                 GLib.idle_add(redraw)
@@ -93,8 +86,11 @@ def run_gtk():
         area.set_draw_func(draw)
 
         # ── interaction ───────────────────────────────────────────────────────
-        def axis(v, tag):
-            return v.slider if tag == "slider" else v.chart_geom
+        def scrub(v, tag, x):
+            if tag == "slider":
+                v.slider_set(x)
+            else:
+                v.t = v.t_from_x(x, *v.chart_geom)
 
         def on_press(g, n, x, y):
             v = state["view"]
@@ -107,9 +103,19 @@ def run_gtk():
                 v.playing = not v.playing
             elif tag == "speed":
                 v.speed = {2.0: 4.0, 4.0: 8.0, 8.0: 1.0, 1.0: 2.0}.get(v.speed, 2.0)
+            elif tag == "zoom_in":
+                v.zoom_by(+0.5)
+            elif tag == "zoom_out":
+                v.zoom_by(-0.5)
+            elif tag == "zoom_reset":
+                v.reset_camera()
+            elif tag == "map":
+                if n == 2:
+                    v.zoom_by(+1.0, x, y)                      # double-click zooms in on that point
+                v.begin_pan(); state["drag"] = "map"
             elif tag in ("slider", "chart"):
                 v.playing = False
-                v.t = v.t_from_x(x, *axis(v, tag))
+                scrub(v, tag, x)
                 state["drag"] = tag
             redraw()
         click = Gtk.GestureClick(); click.connect("pressed", on_press); area.add_controller(click)
@@ -126,10 +132,29 @@ def run_gtk():
             if v is None or not state["drag"]:
                 return
             ok, sx, sy = g.get_start_point()
-            v.t = v.t_from_x(sx + dx, *axis(v, state["drag"])); redraw()
+            if state["drag"] == "map":
+                v.pan_to(dx, dy)
+            else:
+                scrub(v, state["drag"], sx + dx)
+            redraw()
         drag.connect("drag-update", on_drag)
         drag.connect("drag-end", lambda *_: state.update(drag=None))
         area.add_controller(drag)
+
+        scroll = Gtk.EventControllerScroll.new(Gtk.EventControllerScrollFlags.VERTICAL)
+        mouse = {"x": 0.0, "y": 0.0}
+        mot_pos = Gtk.EventControllerMotion()
+        mot_pos.connect("motion", lambda c, x, y: mouse.update(x=x, y=y))
+        area.add_controller(mot_pos)
+
+        def on_scroll(c, dx, dy):
+            v = state["view"]
+            if v is not None and v.hit(mouse["x"], mouse["y"])[0] in ("map", "zoom_in", "zoom_out", "zoom_reset"):
+                v.zoom_by(-0.4 * dy, mouse["x"], mouse["y"]); redraw()
+                return True
+            return False
+        scroll.connect("scroll", on_scroll)
+        area.add_controller(scroll)
 
         def on_key(c, keyval, keycode, mods):
             v = state["view"]
@@ -147,8 +172,14 @@ def run_gtk():
                 v.speed = min(max(v.speed * (2 if name == "Up" else 0.5), 1.0), 8.0)
             elif name == "Home":
                 v.t = float(v.i0)
-            elif name in ("1", "2", "3", "4"):
+            elif name in ("1", "2", "3", "4", "5"):
                 v.layer = wv.LAYERS[int(name) - 1][0]
+            elif name in ("plus", "equal", "KP_Add"):
+                v.zoom_by(+0.5)
+            elif name in ("minus", "KP_Subtract"):
+                v.zoom_by(-0.5)
+            elif name in ("0", "KP_0"):
+                v.reset_camera()
             redraw(); return True
         kc = Gtk.EventControllerKey(); kc.connect("key-pressed", on_key); win.add_controller(kc)
 
@@ -161,10 +192,12 @@ def run_gtk():
             if v is None:
                 state["view"] = make_view(); redraw()
             else:
-                if v.proj is None:
+                if v.maps is None:
                     start_maps()
                 if v.playing:
                     v.tick(0.033); redraw()
+                elif v.poll():
+                    redraw()
             return True
         GLib.timeout_add(33, tick)
 

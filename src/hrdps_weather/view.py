@@ -41,8 +41,15 @@ CHART_RECT = (612, 110, 770, 680)
 MP = 200                           # overlay raster size (square, mercator space)
 COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSO", "SO", "OSO", "O", "ONO", "NO", "NNO"]
 
-LAYERS = [("rt", "💧 Précip."), ("tt", "🌡 Temp."), ("ws", "💨 Vent"), ("nt", "☁ Nuages")]
-LAYER_TITLE = {"rt": "Précipitations (taux)", "tt": "Température à 2 m", "ws": "Vent à 10 m", "nt": "Couverture nuageuse"}
+LAYERS = [("rt", "💧 Précip."), ("tt", "🌡 Temp."), ("ws", "💨 Vent"), ("nt", "☁ Nuages"), ("radar", "📡 Radar")]
+LAYER_TITLE = {"rt": "Précipitations (prévision HRDPS)", "tt": "Température à 2 m (HRDPS)", "ws": "Vent à 10 m (HRDPS)",
+               "nt": "Couverture nuageuse (HRDPS)", "radar": "Radar météo (observé, ECCC)"}
+DEFAULT_Z, MIN_Z, MAX_Z = 7.55, 5.5, 11.0        # tile-zoom of the camera (7.55 ≈ the 3-tile block of earlier versions)
+OV = 160                                         # model overlay raster size (square), scaled up with bilinear filtering
+# Official radar palette (GeoMet legend, 0.1 → 200 mm/h), evenly spaced on the legend.
+RADAR_COLORS = [(133, 197, 254), (0, 174, 222), (0, 241, 76), (0, 186, 0), (0, 133, 0), (106, 165, 0), (254, 231, 0),
+                (254, 176, 0), (254, 123, 0), (254, 34, 0), (254, 1, 108), (178, 39, 191), (112, 11, 163), (59, 0, 89)]
+RADAR_TICKS = [0.1, 1, 2, 4, 8, 12, 16, 24, 32, 50, 64, 100, 125, 200]
 
 def compass(deg):
     return COMPASS[int((deg % 360) / 22.5 + 0.5) % 16]
@@ -125,6 +132,17 @@ def _bilinear(a, R, C):
     return (a[r0, c0] * (1 - fr) * (1 - fc) + a[r0, c1] * (1 - fr) * fc
             + a[r1, c0] * fr * (1 - fc) + a[r1, c1] * fr * fc)
 
+def world_xy(lon, lat, z):
+    """Web Mercator pixel coordinates (256-px tiles) of lon/lat at (fractional) zoom z. Works on arrays."""
+    import numpy as np
+    n = 256 * 2.0 ** z
+    return (np.asarray(lon) + 180) / 360 * n, (1 - np.arcsinh(np.tan(np.radians(lat))) / math.pi) / 2 * n
+
+def world_lonlat(wx, wy, z):
+    import numpy as np
+    n = 256 * 2.0 ** z
+    return np.asarray(wx) / n * 360 - 180, np.degrees(np.arctan(np.sinh(math.pi * (1 - 2 * np.asarray(wy) / n))))
+
 def merc(lat):
     return math.asinh(math.tan(math.radians(lat)))
 
@@ -149,6 +167,7 @@ LEGENDS = {   # layer -> (stops used for the bar, tick values, unit)
     "tt": (TEMP_STOPS, [-30, -15, -5, 0, 5, 12, 20, 28, 35], "°C"),
     "ws": (WIND_STOPS, [0, 10, 25, 40, 60, 80, 100], "km/h"),
     "nt": ([(0, 255, 255, 255, 0), (100, 255, 255, 255, 190)], [0, 25, 50, 75, 100], "%"),
+    "radar": (None, None, "mm/h"),
 }
 
 def colorize(layer, a, tt=None):
@@ -177,47 +196,108 @@ def to_surface(rgba):
 
 # ── The view ─────────────────────────────────────────────────────────────────
 class View:
-    def __init__(self, data):
+    def __init__(self, data, tiles=None):
         self.d = data
         self.i0, self.i1 = data.now_index(), data.n - 1
         self.t = float(self.i0)
-        self.layer, self.playing, self.speed = "rt", True, 2.0       # hours per second
+        self.layer, self.playing, self.speed = "rt", True, 2.0       # speed: model hours per second
         self.hits = []
-        self.maps = None; self.base = None; self.proj = None; self.bounds = None
+        self.maps = None                                           # {"region": (grids, bounds), "wide": ...}
         self.status = ""                                           # message shown over the map
+        self.tiles = tiles                                         # tiles.TileCache or None (no base map)
+        self.radar = None                                          # radar.RadarLoader, created on first use
+        self.rt = 0.0                                              # radar frame cursor (float index)
+        self.reset_camera()
+        self._seen = (-1, -1)
+        self._pan0 = None
 
-    # -- maps ----------------------------------------------------------------
-    def set_maps(self, maps, base_img):
-        import numpy as np
+    # -- camera ----------------------------------------------------------------
+    def reset_camera(self):
+        self.clon, self.clat, self.z = hrdps.LON, hrdps.LAT, DEFAULT_Z
+
+    def _center_world(self):
+        wx, wy = world_xy(self.clon, self.clat, self.z)
+        return float(wx), float(wy)
+
+    def _set_center_world(self, wx, wy):
+        lon, lat = world_lonlat(wx, wy, self.z)
+        self.clon, self.clat = float(min(max(lon, -179.9), 179.9)), float(min(max(lat, -80), 80))
+
+    def zoom_by(self, dz, ax=None, ay=None):
+        """Zoom by dz levels keeping the point under (ax, ay) (design-space coordinates) fixed."""
+        mx, my, mw, mh = MAP_RECT
+        ax = mx + mw / 2 if ax is None else ax
+        ay = my + mh / 2 if ay is None else ay
+        cx, cy = self._center_world()
+        lon, lat = world_lonlat(cx + (ax - mx - mw / 2), cy + (ay - my - mh / 2), self.z)
+        self.z = min(max(self.z + dz, MIN_Z), MAX_Z)
+        wx, wy = world_xy(lon, lat, self.z)
+        self._set_center_world(float(wx) - (ax - mx - mw / 2), float(wy) - (ay - my - mh / 2))
+
+    def begin_pan(self):
+        self._pan0 = self._center_world()
+
+    def pan_to(self, dx, dy):
+        """Move the map by (dx, dy) pixels relative to where the drag began."""
+        if self._pan0 is not None:
+            self._set_center_world(self._pan0[0] - dx, self._pan0[1] - dy)
+
+    # -- data ----------------------------------------------------------------
+    def set_maps(self, maps):
+        """maps = hrdps.load_maps(). Assigned last: the UI thread may already be drawing."""
         if maps:
-            grids, bounds, _ = maps
-            w, s, e, n = bounds
-            ys = (np.arange(MP) + 0.5) / MP
-            m_n, m_s = merc(n), merc(s)
-            lat = np.degrees(np.arctan(np.sinh(m_n + (m_s - m_n) * ys)))
-            lon = w + (e - w) * (np.arange(MP) + 0.5) / MP
-            out = {}
-            for k, arr in grids.items():
-                T, ny, nx = arr.shape
-                R, Cc = np.meshgrid((n - lat) / (n - s) * ny - 0.5, (lon - w) / (e - w) * nx - 0.5, indexing="ij")
-                out[k] = np.stack([_bilinear(np.nan_to_num(arr[i]), R, Cc) for i in range(T)]).astype(np.float32)
-            out["rt"] *= 3600                                  # kg/m²/s → mm/h
-            wd = np.radians(out["wd"])
-            self.u, self.v = -out["ws"] * np.sin(wd), -out["ws"] * np.cos(wd)   # wind blows *toward* (east, north)
-            self.bounds = bounds
-            self.proj = out                       # assigned last: the GTK thread may already be drawing
-        if base_img is not None:
-            arr = np.array(base_img.convert("RGBA"))[..., [2, 1, 0, 3]].copy()
-            h, w = arr.shape[:2]
-            self._base_buf = bytearray(arr.tobytes())
-            self.base = cairo.ImageSurface.create_for_data(self._base_buf, cairo.FORMAT_ARGB32, w, h, w * 4)
+            self.maps = maps
         self.status = ""
 
-    def _frame(self, k):
-        i = int(math.floor(self.t)); f = self.t - i
-        j = min(i + 1, self.i1)
-        a = self.proj[k]
-        return a[i] * (1 - f) + a[j] * f
+    @staticmethod
+    def _grid_sample(arr, bounds, lon2, lat2):
+        """Bilinear sample of one hourly grid at lon/lat arrays -> (values, inside-mask)."""
+        import numpy as np
+        w, s_, e, n = bounds
+        ny, nx = arr.shape
+        col = (lon2 - w) / (e - w) * nx - 0.5
+        row = (n - lat2) / (n - s_) * ny - 0.5
+        inside = (col >= -0.5) & (col <= nx - 0.5) & (row >= -0.5) & (row <= ny - 0.5)
+        return _bilinear(np.nan_to_num(arr), row, col), inside
+
+    def _sample(self, k, i, lon2, lat2):
+        """Layer k at model hour i, at lon/lat arrays: coarse wide grid first, region grid on top of it. NaN outside."""
+        import numpy as np
+        out = np.full(np.shape(lon2), np.nan, np.float32)
+        for key in ("wide", "region"):
+            part = self.maps.get(key)
+            if not part:
+                continue
+            grids, bounds = part
+            val, inside = self._grid_sample(grids[k][i], bounds, lon2, lat2)
+            out = np.where(inside, val, out)
+        return out
+
+    def _sample_t(self, k, lon2, lat2):
+        i = int(math.floor(self.t)); f = self.t - i; j = min(i + 1, self.i1)
+        a = self._sample(k, i, lon2, lat2)
+        return a if f < 1e-3 or j == i else a * (1 - f) + self._sample(k, j, lon2, lat2) * f
+
+    def _uv_t(self, lon2, lat2):
+        """Wind vector (east, north) blowing *toward*, m/s, interpolated in time."""
+        import numpy as np
+        i = int(math.floor(self.t)); f = self.t - i; j = min(i + 1, self.i1)
+        def uv(h):
+            sp, wd = self._sample("ws", h, lon2, lat2), np.radians(self._sample("wd", h, lon2, lat2))
+            return -sp * np.sin(wd), -sp * np.cos(wd)
+        (u0, v0), (u1, v1) = uv(i), uv(j)
+        return u0 * (1 - f) + u1 * f, v0 * (1 - f) + v1 * f
+
+    def _view_lonlat(self, n):
+        """lon/lat of an n×n grid of pixel centres covering the map rectangle."""
+        import numpy as np
+        mx, my, mw, mh = MAP_RECT
+        cx, cy = self._center_world()
+        px = (np.arange(n) + 0.5) / n * mw - mw / 2
+        py = (np.arange(n) + 0.5) / n * mh - mh / 2
+        lon, _ = world_lonlat(cx + px, np.full(n, cy), self.z)
+        _, lat = world_lonlat(np.full(n, cx), cy + py, self.z)
+        return np.meshgrid(lon, lat)
 
     # -- interaction ---------------------------------------------------------
     def hit(self, x, y):
@@ -229,11 +309,36 @@ class View:
     def t_from_x(self, x, x0, w):
         return min(max(self.i0 + (x - x0) / w * (self.i1 - self.i0), self.i0), self.i1)
 
+    def slider_set(self, x):
+        """Move the time cursor from a slider x position (model time, or radar frames in radar mode)."""
+        sx, sw = self.slider
+        f = min(max((x - sx) / sw, 0.0), 1.0)
+        if self.layer == "radar":
+            n = len(self.radar.frames) if self.radar else 0
+            self.rt = f * max(n - 1, 0)
+        else:
+            self.t = self.i0 + f * (self.i1 - self.i0)
+
+    def poll(self):
+        """True when something that arrived in the background (tiles, radar) should trigger a redraw."""
+        seen = (self.tiles.version if self.tiles else -1, self.radar.version if self.radar else -1)
+        changed = seen != self._seen
+        self._seen = seen
+        return changed
+
     def tick(self, dt):
-        if self.playing:
-            self.t += dt * self.speed
-            if self.t >= self.i1:
-                self.t = float(self.i0)
+        if not self.playing:
+            return
+        if self.layer == "radar":
+            n = len(self.radar.frames) if self.radar else 0
+            if n:
+                self.rt += dt * self.speed * 2               # ~4 frames/s at the default speed
+                if self.rt >= n + 1.5:                       # hold on the latest frame, then loop
+                    self.rt = 0.0
+            return
+        self.t += dt * self.speed
+        if self.t >= self.i1:
+            self.t = float(self.i0)
 
     # -- drawing -------------------------------------------------------------
     def draw(self, cr, w, h):
@@ -281,68 +386,191 @@ class View:
 
     # map -----------------------------------------------------------------------
     def draw_map(self, cr):
+        import numpy as np
         x, y, w, h = MAP_RECT
+        self.hits.append(((x, y, w, h), "map", None))
         cr.save(); rrect(cr, x, y, w, h, 12); cr.clip()
         cr.set_source_rgb(*PANEL); cr.paint()
-        if self.base is not None:
-            cr.save(); cr.translate(x, y); cr.scale(w / self.base.get_width(), h / self.base.get_height())
-            cr.set_source_surface(self.base, 0, 0); cr.paint(); cr.restore()
-        if self.proj is not None:
-            lay = self.layer
-            a = self._frame(lay)
-            surf, buf = to_surface(colorize(lay, a, self._frame("tt") if lay == "rt" else None))
-            cr.save(); cr.translate(x, y); cr.scale(w / MP, h / MP)
+        if self.tiles is not None:
+            self._draw_tiles(cr, x, y, w, h)
+        lay = self.layer
+        if lay == "radar":
+            self._draw_radar(cr, x, y, w, h)
+        elif self.maps is not None:
+            lon2, lat2 = self._view_lonlat(OV)
+            a = self._sample_t(lay, lon2, lat2)
+            tt = self._sample_t("tt", lon2, lat2) if lay == "rt" else None
+            if lay == "rt":
+                a = a * 3600                                  # kg/m²/s → mm/h
+            rgba = colorize(lay, np.nan_to_num(a), None if tt is None else np.nan_to_num(tt, nan=10.0))
+            rgba[..., 3] *= (~np.isnan(a))
+            surf, buf = to_surface(rgba)
+            cr.save(); cr.translate(x, y); cr.scale(w / OV, h / OV)
             cr.set_source_surface(surf, 0, 0)
             cr.get_source().set_filter(cairo.FILTER_BILINEAR); cr.paint(); cr.restore()
             if lay == "ws":
                 self.draw_arrows(cr, x, y, w, h)
-            self.draw_marker(cr, x, y, w, h)
         else:
             text(cr, self.status or "Cartes en téléchargement…", x + w / 2, y + h / 2, 16, SUBTLE, False, "c", "m")
+        self.draw_marker(cr, x, y, w, h)
         cr.restore()
-        # caption + legend
+        # caption, zoom buttons, scale bar, legend, attribution
         cr.save(); rrect(cr, x, y, w, 30, 12); cr.clip()
         cr.set_source_rgba(*PANEL, 0.72); cr.paint(); cr.restore()
-        t = self.d.local[min(int(round(self.t)), self.i1)]
-        text(cr, LAYER_TITLE[self.layer], x + 12, y + 6, 14, TEXT, True)
-        text(cr, hrdps.fr(t, "%a %d %b · %Hh"), x + w - 12, y + 6, 14, SUBTLE, True, "r")
+        text(cr, LAYER_TITLE[lay], x + 12, y + 6, 14, TEXT, True)
+        text(cr, self._time_label(), x + w - 12, y + 6, 14, SUBTLE, True, "r")
+        self._draw_zoom_buttons(cr, x, y, w, h)
+        self._draw_scale(cr, x + 12, y + 44)
         self.draw_legend(cr, x + 12, y + h - 32, w - 24)
-        text(cr, "© contributeurs OpenStreetMap · données HRDPS © ECCC", x + 12, y + h - 15, 9, SUBTLE, False, "l", alpha=0.8)
+        credit = "© contributeurs OpenStreetMap · " + ("radar ECCC" if lay == "radar" else "données HRDPS © ECCC")
+        text(cr, credit, x + 12, y + h - 15, 9, SUBTLE, False, "l", alpha=0.8)
+
+    def _time_label(self):
+        if self.layer == "radar":
+            fr = self.radar.frames if self.radar else []
+            if not fr:
+                return "chargement…" if (self.radar and self.radar.state == "loading") else "—"
+            t = fr[min(int(round(self.rt)), len(fr) - 1)][0]
+            ago = int(round((fr[-1][0] - t).total_seconds() / 60))
+            return f"{hrdps.fr(t.astimezone(hrdps.TZ), '%Hh%M')} · " + ("dernière image" if ago == 0 else f"il y a {ago} min")
+        return hrdps.fr(self.d.local[min(int(round(self.t)), self.i1)], "%a %d %b · %Hh")
+
+    def _draw_tiles(self, cr, x, y, w, h):
+        tc = self.tiles
+        zt = int(min(max(round(self.z), 2), 12))
+        s = 2.0 ** (self.z - zt)
+        cxz, cyz = (float(v) for v in world_xy(self.clon, self.clat, zt))
+        hw, hh = w / 2 / s, h / 2 / s
+        n = 2 ** zt
+        for ty in range(int((cyz - hh) // 256), int((cyz + hh) // 256) + 1):
+            if ty < 0 or ty >= n:
+                continue
+            for tx in range(int((cxz - hw) // 256), int((cxz + hw) // 256) + 1):
+                best = tc.get_best(zt, tx % n, ty)
+                if best is None:
+                    continue
+                surf, zz, xx, yy = best
+                f = 2 ** (zt - zz)                              # an ancestor tile covers f×f tiles of level zt
+                left = xx * 256 * f + (tx - tx % n) * 256
+                top = yy * 256 * f
+                cr.save()
+                cr.rectangle(x + w / 2 + (tx * 256 - cxz) * s, y + h / 2 + (ty * 256 - cyz) * s, 256 * s + 0.6, 256 * s + 0.6)
+                cr.clip()
+                cr.translate(x + w / 2 + (left - cxz) * s, y + h / 2 + (top - cyz) * s)
+                cr.scale(f * s * 256 / surf.get_width(), f * s * 256 / surf.get_height())
+                cr.set_source_surface(surf, 0, 0)
+                cr.get_source().set_filter(cairo.FILTER_BILINEAR)
+                cr.paint()
+                cr.restore()
+
+    def _view_meters(self):
+        """Map rectangle as a Web Mercator bbox in metres (minx, miny, maxx, maxy)."""
+        mx, my, mw, mh = MAP_RECT
+        cx, cy = self._center_world()
+        n = 256 * 2.0 ** self.z
+        R = 20037508.342789244
+        to_x = lambda wx: (wx / n * 2 - 1) * R
+        to_y = lambda wy: (1 - wy / n * 2) * R
+        return (to_x(cx - mw / 2), to_y(cy + mh / 2), to_x(cx + mw / 2), to_y(cy - mh / 2))
+
+    def _draw_radar(self, cr, x, y, w, h):
+        from .radar import RadarLoader, R
+        if self.radar is None:
+            self.radar = RadarLoader()
+        self.radar.request(self._view_meters(), self.z, w)
+        fr = self.radar.frames
+        if not fr:
+            msg = "Radar indisponible (réseau ?)" if self.radar.state == "error" else "Chargement du radar…"
+            text(cr, msg, x + w / 2, y + h / 2, 16, SUBTLE, False, "c", "m")
+            return
+        t, surf = fr[min(int(round(self.rt)), len(fr) - 1)]
+        minx, miny, maxx, maxy = self.radar.bbox
+        n = 256 * 2.0 ** self.z
+        cx, cy = self._center_world()
+        wx0, wx1 = (minx / R + 1) / 2 * n, (maxx / R + 1) / 2 * n
+        wy0, wy1 = (1 - maxy / R) / 2 * n, (1 - miny / R) / 2 * n
+        cr.save()
+        cr.translate(x + w / 2 + (wx0 - cx), y + h / 2 + (wy0 - cy))
+        cr.scale((wx1 - wx0) / surf.get_width(), (wy1 - wy0) / surf.get_height())
+        cr.set_source_surface(surf, 0, 0)
+        cr.get_source().set_filter(cairo.FILTER_BILINEAR)
+        cr.paint_with_alpha(0.88)
+        cr.restore()
+        if self.radar.state == "loading":
+            text(cr, "mise à jour…", x + w - 12, y + 44, 11, SUBTLE, False, "r")
 
     def draw_marker(self, cr, x, y, w, h):
-        bw, bs, be, bn = self.bounds
-        fx = (hrdps.LON - bw) / (be - bw)
-        fy = (merc(bn) - merc(hrdps.LAT)) / (merc(bn) - merc(bs))
-        px, py = x + fx * w, y + fy * h
+        cx, cy = self._center_world()
+        mx, my = world_xy(hrdps.LON, hrdps.LAT, self.z)
+        px, py = x + w / 2 + (float(mx) - cx), y + h / 2 + (float(my) - cy)
+        if not (x - 20 <= px <= x + w + 20 and y - 20 <= py <= y + h + 20):
+            return
         cr.set_source_rgba(1, 1, 1, 0.95); cr.arc(px, py, 6, 0, 2 * math.pi); cr.fill()
         cr.set_source_rgb(*RED); cr.arc(px, py, 4, 0, 2 * math.pi); cr.fill()
         text(cr, hrdps.LOCATION, px + 9, py - 8, 12, TEXT, True)
 
+    def _draw_zoom_buttons(self, cr, x, y, w, h):
+        bx = x + w - 44
+        for k, (tag, label) in enumerate((("zoom_in", "+"), ("zoom_out", "−"), ("zoom_reset", ""))):
+            by = y + 40 + k * 38
+            cr.set_source_rgba(*PANEL, 0.82); rrect(cr, bx, by, 32, 32, 8); cr.fill()
+            cr.set_source_rgba(*SUBTLE, 0.5); cr.set_line_width(1); rrect(cr, bx + 0.5, by + 0.5, 31, 31, 8); cr.stroke()
+            if label:
+                text(cr, label, bx + 16, by + 16, 20, TEXT, True, "c", "m")
+            else:                                              # "recentre" target
+                cr.set_source_rgb(*TEXT); cr.set_line_width(1.8)
+                cr.arc(bx + 16, by + 16, 7, 0, 2 * math.pi); cr.stroke()
+                for dx, dy in ((0, -11), (0, 11), (-11, 0), (11, 0)):
+                    cr.move_to(bx + 16 + dx * 0.55, by + 16 + dy * 0.55); cr.line_to(bx + 16 + dx, by + 16 + dy); cr.stroke()
+            self.hits.append(((bx, by, 32, 32), tag, None))
+
+    def _draw_scale(self, cr, x, y):
+        m_per_px = 40075016.686 * math.cos(math.radians(self.clat)) / (256 * 2.0 ** self.z)
+        for km in (1, 2, 5, 10, 20, 50, 100, 200, 500, 1000):
+            if km * 1000 / m_per_px >= 60:
+                break
+        L = km * 1000 / m_per_px
+        cr.set_source_rgba(1, 1, 1, 0.9); cr.set_line_width(2)
+        cr.move_to(x, y + 5); cr.line_to(x, y + 10); cr.line_to(x + L, y + 10); cr.line_to(x + L, y + 5); cr.stroke()
+        text(cr, f"{km} km", x + 4, y - 6, 10, TEXT, True)
+
     def draw_arrows(self, cr, x, y, w, h, n=13):
-        i = int(math.floor(self.t)); f = self.t - i; j = min(i + 1, self.i1)
-        u = self.u[i] * (1 - f) + self.u[j] * f
-        v = self.v[i] * (1 - f) + self.v[j] * f
-        step = MP / n
+        import numpy as np
+        px = (np.arange(n) + 0.5) / n
+        cx, cy = self._center_world()
+        lon, _ = world_lonlat(cx + (px * w - w / 2), np.full(n, cy), self.z)
+        _, lat = world_lonlat(np.full(n, cx), cy + (px * h - h / 2), self.z)
+        lon2, lat2 = np.meshgrid(lon, lat)
+        u, v = self._uv_t(lon2, lat2)
         cr.set_line_width(1.6); cr.set_line_cap(cairo.LINE_CAP_ROUND)
         for r in range(n):
             for c in range(n):
-                gy, gx = int((r + 0.5) * step), int((c + 0.5) * step)
-                uu, vv = float(u[gy, gx]), float(v[gy, gx])
+                uu, vv = float(u[r, c]), float(v[r, c])
                 sp = math.hypot(uu, vv)
-                if sp < 0.5:
+                if sp < 0.5 or math.isnan(sp):
                     continue
                 L = 9 + min(sp, 25) * 0.55
-                ang = math.atan2(uu, vv)                # compass angle of travel (0 = north)
-                cx, cy = x + (gx + 0.5) / MP * w, y + (gy + 0.5) / MP * h
-                cr.save(); cr.translate(cx, cy); cr.rotate(ang)
+                ang = math.atan2(uu, vv)                       # compass angle of travel (0 = north)
+                cr.save(); cr.translate(x + (c + 0.5) / n * w, y + (r + 0.5) / n * h); cr.rotate(ang)
                 cr.set_source_rgba(1, 1, 1, 0.9)
                 cr.move_to(0, L / 2); cr.line_to(0, -L / 2); cr.stroke()
                 cr.move_to(-3.5, -L / 2 + 5); cr.line_to(0, -L / 2); cr.line_to(3.5, -L / 2 + 5); cr.stroke()
                 cr.restore()
 
     def draw_legend(self, cr, x, y, w):
-        stops, ticks, unit = LEGENDS[self.layer]
         import numpy as np
+        if self.layer == "radar":
+            n = len(RADAR_COLORS)
+            sw = w / n
+            cr.save(); rrect(cr, x, y, w, 8, 4); cr.clip()
+            for k, c in enumerate(RADAR_COLORS):
+                cr.set_source_rgb(c[0] / 255, c[1] / 255, c[2] / 255); cr.rectangle(x + k * sw, y, sw + 0.6, 8); cr.fill()
+            cr.restore()
+            for k in (0, 1, 3, 4, 6, 8, 9, 11, 13):
+                text(cr, f"{RADAR_TICKS[k]:g}", x + (k + 0.5) * sw, y - 14, 10, SUBTLE, False, "c")
+            text(cr, "mm/h", x + w, y + 10, 10, MUTED, False, "r")
+            return
+        stops, ticks, unit = LEGENDS[self.layer]
         lo, hi = (stops[0][0], stops[-1][0])
         if self.layer == "rt":
             vals = np.concatenate([np.linspace(0.0, 1.0, 20), np.linspace(1, 32, 60)])
@@ -367,13 +595,13 @@ class View:
     def draw_controls(self, cr):
         x0, y0, w, _ = MAP_RECT
         by = y0 + MAP_RECT[3] + 12
-        bx = x0
+        bx, gap = x0, 6
+        bw = (w - gap * (len(LAYERS) - 1)) / len(LAYERS)
         for key, label in LAYERS:
-            bw = 124
             on = key == self.layer
             cr.set_source_rgb(*(BLUE if on else SURFACE)); rrect(cr, bx, by, bw, 32, 9); cr.fill()
             text(cr, label, bx + bw / 2, by + 16, 14, PANEL if on else SUBTLE, on, "c", "m")
-            self.hits.append(((bx, by, bw, 32), "layer", key)); bx += bw + 8
+            self.hits.append(((bx, by, bw, 32), "layer", key)); bx += bw + gap
         # play/pause + speed + slider
         ty = by + 50
         cr.set_source_rgb(*SURFACE); cr.arc(x0 + 20, ty + 4, 20, 0, 2 * math.pi); cr.fill()
@@ -389,13 +617,29 @@ class View:
         sx, sw = x0 + 112, w - 112
         self.slider = (sx, sw)
         cr.set_source_rgb(*SURFACE); rrect(cr, sx, ty - 2, sw, 12, 6); cr.fill()
-        frac = (self.t - self.i0) / max(self.i1 - self.i0, 1)
-        cr.set_source_rgb(*BLUE); rrect(cr, sx, ty - 2, max(12, frac * sw), 12, 6); cr.fill()
-        for k in range(self.i0, self.i1 + 1):                     # midnight ticks
-            if self.d.local[k].hour == 0:
-                px = sx + (k - self.i0) / (self.i1 - self.i0) * sw
-                cr.set_source_rgba(*TEXT, 0.5); cr.rectangle(px - 0.5, ty - 6, 1, 20); cr.fill()
-                text(cr, hrdps.fr(self.d.local[k], "%a"), px + 3, ty + 12, 10, MUTED)
+        if self.layer == "radar":
+            fr = self.radar.frames if self.radar else []
+            n = len(fr)
+            frac = min(self.rt, n - 1) / max(n - 1, 1) if n else 0.0
+            cr.set_source_rgb(*BLUE); rrect(cr, sx, ty - 2, max(12, frac * sw), 12, 6); cr.fill()
+            for k in range(n):                                   # hour marks counted back from the latest frame
+                ago = (fr[-1][0] - fr[k][0]).total_seconds() / 60
+                if ago % 60 < 1 or ago < 1:
+                    px = sx + k / max(n - 1, 1) * sw
+                    cr.set_source_rgba(*TEXT, 0.5); cr.rectangle(px - 0.5, ty - 6, 1, 20); cr.fill()
+                    label = "maint." if ago < 1 else f"-{int(round(ago / 60))} h"
+                    if ago < 1:
+                        text(cr, label, px - 3, ty + 12, 10, MUTED, False, "r")      # keep it inside the slider
+                    else:
+                        text(cr, label, px + 3, ty + 12, 10, MUTED)
+        else:
+            frac = (self.t - self.i0) / max(self.i1 - self.i0, 1)
+            cr.set_source_rgb(*BLUE); rrect(cr, sx, ty - 2, max(12, frac * sw), 12, 6); cr.fill()
+            for k in range(self.i0, self.i1 + 1):                 # midnight ticks
+                if self.d.local[k].hour == 0:
+                    px = sx + (k - self.i0) / (self.i1 - self.i0) * sw
+                    cr.set_source_rgba(*TEXT, 0.5); cr.rectangle(px - 0.5, ty - 6, 1, 20); cr.fill()
+                    text(cr, hrdps.fr(self.d.local[k], "%a"), px + 3, ty + 12, 10, MUTED)
         cr.set_source_rgb(*TEXT); cr.arc(sx + frac * sw, ty + 4, 9, 0, 2 * math.pi); cr.fill()
         self.hits.append(((sx - 6, ty - 14, sw + 12, 36), "slider", None))
 
@@ -591,13 +835,21 @@ class View:
         text(cr, "maintenant" if off == 0 else f"dans {off} h" if off > 0 else f"il y a {-off} h", M + 300, y0 + 1, 11, MUTED)
 
 
-def render_png(path, data, layer="rt", hour=None, maps=None, base=None):
-    v = View(data)
+def render_png(path, data, layer="rt", hour=None, maps=None, tiles=None, wait=False):
+    """Render one still image. With `tiles` (a TileCache) and wait=True the base map is downloaded first."""
+    v = View(data, tiles)
     v.layer = layer
     if hour is not None:
         v.t = float(min(max(data.now_index() + hour, v.i0), v.i1))
-    v.set_maps(maps, base)
+    v.set_maps(maps)
     surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, W, H)
+    if wait:
+        v.draw(cairo.Context(surf), W, H)                   # first pass only schedules the downloads
+        if tiles is not None:
+            tiles.wait()
+        if v.radar is not None:
+            v.radar.wait()
+        v.rt = 1e9                                 # radar still: latest frame
     cr = cairo.Context(surf)
     v.draw(cr, W, H)
     surf.write_to_png(path)

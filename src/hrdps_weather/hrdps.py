@@ -10,7 +10,7 @@ WCS GetCoverage for map grids). No other weather source is used.
 
 Cache: ~/.cache/waybar-weather/
 """
-import io, json, math, os, re, subprocess, sys, time, urllib.request
+import json, math, os, re, subprocess, sys, time, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -31,7 +31,9 @@ CACHE    = config.cache_dir()
 HOURS    = 48
 FMT      = "%Y-%m-%dT%H:%M:%SZ"
 CHECK_EVERY = 600            # s between "is there a new run?" checks
-MAP_ZOOM, MAP_TILES = 8, 3   # basemap: 3x3 OSM tiles at z8 (~±2° around the point)
+REGION_ZOOM, WIDE_ZOOM, MAP_TILES = 8, 6, 3   # data grids cover a 3x3 tile block: z8 (~±2°) and z6 (~±8°)
+WIDE_CELLS = 120                              # the wide grid is coarse (≈0.14°): it only serves zoomed-out views
+MAPS_FORMAT = 2
 
 C = "HRDPS.CONTINENTAL_"
 W = "HRDPS-WEonG_2.5km_"
@@ -125,7 +127,7 @@ def _fetch_series(ref):
             "series": series, "labels": labels}
 
 # ── Map grids (WCS) ──────────────────────────────────────────────────────────
-def tile_xy(z=MAP_ZOOM):
+def tile_xy(z=REGION_ZOOM):
     n = 2 ** z
     return (int((LON + 180) / 360 * n),
             int((1 - math.asinh(math.tan(math.radians(LAT))) / math.pi) / 2 * n))
@@ -134,18 +136,20 @@ def _tile_lonlat(x, y, z):
     n = 2 ** z
     return x / n * 360 - 180, math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * y / n))))
 
-def map_bounds():
-    """(lon_w, lat_s, lon_e, lat_n) of the basemap tile block."""
-    x, y = tile_xy(); h = MAP_TILES // 2
-    w, n = _tile_lonlat(x - h, y - h, MAP_ZOOM)
-    e, s = _tile_lonlat(x + h + 1, y + h + 1, MAP_ZOOM)
+def map_bounds(z=REGION_ZOOM):
+    """(lon_w, lat_s, lon_e, lat_n) of the 3x3 tile block around the point at zoom z."""
+    x, y = tile_xy(z); h = MAP_TILES // 2
+    w, n = _tile_lonlat(x - h, y - h, z)
+    e, s = _tile_lonlat(x + h + 1, y + h + 1, z)
     return w, s, e, n
 
-def _fetch_grid(layer, t, bounds):
+def _fetch_grid(layer, t, bounds, cells=None):
+    """One hourly grid (rows north→south). `cells` = number of columns to resample to (None: native-ish)."""
     import numpy as np
     w, s, e, n = bounds
+    scale = f"&SCALESIZE=x({cells}),y({round(cells * (n - s) / (e - w))})" if cells else ""
     url = (f"{GEOMET}?SERVICE=WCS&VERSION=2.0.1&REQUEST=GetCoverage&COVERAGEID={layer}&FORMAT=image/x-aaigrid"
-           f"&SUBSETTINGCRS=EPSG:4326&SUBSET=x({w},{e})&SUBSET=y({s},{n})&TIME={t.strftime(FMT)}")
+           f"&SUBSETTINGCRS=EPSG:4326&SUBSET=x({w},{e})&SUBSET=y({s},{n}){scale}&TIME={t.strftime(FMT)}")
     raw = _get(url, timeout=60)
     if not raw or b"ncols" not in raw:
         return None
@@ -167,19 +171,26 @@ def _fetch_grid(layer, t, bounds):
     return arr
 
 def _fetch_maps(ref):
+    """{key: ndarray[T, ny, nx]} for the region grids ('rt'…) and the coarse wide grids ('w_rt'…); None if the
+    region failed entirely. A wide-grid failure only costs the zoomed-out view."""
     import numpy as np
-    b = map_bounds()
     times = [ref + timedelta(hours=i) for i in range(HOURS + 1)]
-    jobs = [(k, i) for k in MAP_LAYERS for i in range(len(times))]
+    sets = {"": (map_bounds(REGION_ZOOM), None), "w_": (map_bounds(WIDE_ZOOM), WIDE_CELLS)}
+    jobs = [(p, k, i) for p in sets for k in MAP_LAYERS for i in range(len(times))]
     with ThreadPoolExecutor(8) as ex:
-        res = list(ex.map(lambda j: _fetch_grid(MAP_LAYERS[j[0]], times[j[1]], b), jobs))
-    shape = next((r.shape for r in res if r is not None), None)
-    if shape is None:
-        return None
-    out = {k: np.full((len(times),) + shape, np.nan, np.float32) for k in MAP_LAYERS}
-    for (k, i), r in zip(jobs, res):
-        if r is not None and r.shape == shape:
-            out[k][i] = r
+        res = list(ex.map(lambda j: _fetch_grid(MAP_LAYERS[j[1]], times[j[2]], *sets[j[0]]), jobs))
+    out = {}
+    for p in sets:
+        shape = next((r.shape for (pp, _, _), r in zip(jobs, res) if pp == p and r is not None), None)
+        if shape is None:
+            if p == "":
+                return None
+            continue
+        for k in MAP_LAYERS:
+            out[p + k] = np.full((len(times),) + shape, np.nan, np.float32)
+        for (pp, k, i), r in zip(jobs, res):
+            if pp == p and r is not None and r.shape == shape:
+                out[p + k][i] = r
     return out
 
 # ── Cache ────────────────────────────────────────────────────────────────────
@@ -243,7 +254,8 @@ def refresh(force=False, maps=True):
             return
         st = _state()
         have_series = st.get("ref") == ref.strftime(FMT) and _series_path().exists()
-        have_maps   = st.get("maps_ref") == ref.strftime(FMT) and _maps_path().exists()
+        have_maps   = (st.get("maps_ref") == ref.strftime(FMT) and st.get("maps_fmt") == MAPS_FORMAT
+                       and _maps_path().exists())
         if not force and have_series and (have_maps or not maps):
             _save_state(checked=time.time()); return
         if force or not have_series:
@@ -258,9 +270,10 @@ def refresh(force=False, maps=True):
             if g:
                 import numpy as np
                 tmp = CACHE / "maps.tmp.npz"
-                np.savez_compressed(tmp, bounds=np.array(map_bounds()), ref=np.array(ref.strftime(FMT)), **g)
+                np.savez_compressed(tmp, bounds=np.array(map_bounds(REGION_ZOOM)), wide_bounds=np.array(map_bounds(WIDE_ZOOM)),
+                                    ref=np.array(ref.strftime(FMT)), **g)
                 tmp.replace(_maps_path())
-                _save_state(maps_ref=ref.strftime(FMT))
+                _save_state(maps_ref=ref.strftime(FMT), maps_fmt=MAPS_FORMAT)
     finally:
         lock.release()
 
@@ -469,34 +482,19 @@ def load():
 
 def maps_ready(data=None):
     st = _state()
-    return _maps_path().exists() and (data is None or st.get("maps_ref") == data.raw["ref"])
+    return (_maps_path().exists() and st.get("maps_fmt") == MAPS_FORMAT
+            and (data is None or st.get("maps_ref") == data.raw["ref"]))
 
 def load_maps():
-    """-> ({layer: ndarray[T, ny, nx]}, (lon_w, lat_s, lon_e, lat_n), ref_str) or None."""
+    """-> {"region": (grids, bounds), "wide": (grids, bounds) | None, "ref": str} or None.
+    grids = {layer: ndarray[T, ny, nx]}; bounds = (lon_w, lat_s, lon_e, lat_n)."""
     try:
         import numpy as np
         z = np.load(_maps_path())
-        return {k: z[k] for k in MAP_LAYERS}, tuple(float(v) for v in z["bounds"]), str(z["ref"])
+        region = ({k: z[k] for k in MAP_LAYERS}, tuple(float(v) for v in z["bounds"]))
+        wide = None
+        if "w_rt" in z.files:
+            wide = ({k: z["w_" + k] for k in MAP_LAYERS}, tuple(float(v) for v in z["wide_bounds"]))
+        return {"region": region, "wide": wide, "ref": str(z["ref"])}
     except Exception:
         return None
-
-def basemap():
-    """Darkened OSM tile block (PIL RGB), cached on disk; None if tiles are unreachable."""
-    from PIL import Image, ImageOps
-    CACHE.mkdir(parents=True, exist_ok=True)
-    out = CACHE / f"basemap_{MAP_ZOOM}_{MAP_TILES}.png"
-    if out.exists():
-        return Image.open(out).convert("RGB")
-    x0, y0 = tile_xy(); h = MAP_TILES // 2
-    img = Image.new("RGB", (256 * MAP_TILES, 256 * MAP_TILES), (30, 30, 46))
-    for dx in range(-h, h + 1):
-        for dy in range(-h, h + 1):
-            raw = _get(f"https://tile.openstreetmap.org/{MAP_ZOOM}/{x0+dx}/{y0+dy}.png")
-            if raw is None:
-                return None
-            img.paste(Image.open(io.BytesIO(raw)).convert("RGB"), (256 * (dx + h), 256 * (dy + h)))
-    g = ImageOps.autocontrast(ImageOps.invert(img.convert("L")), cutoff=1).point(lambda v: int(18 + v * 0.36))
-    dark = Image.merge("RGB", (g.point(lambda v: int(v * 0.95)), g,
-                               g.point(lambda v: min(255, int(v * 1.25 + 4)))))
-    dark.save(out)
-    return dark

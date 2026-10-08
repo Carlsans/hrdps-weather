@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hrdps-weather"
-version = "1.1.1"
+version = "1.2.0"
 description = "Météo HRDPS (Environnement Canada, 2,5 km) : carte animée, graphiques, module waybar et icône de zone de notification Windows"
 readme = "README.md"
 license = { text = "MIT" }

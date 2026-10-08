@@ -49,12 +49,9 @@ def main(argv=None):
         d = hrdps.load()
         if d is None:
             sys.exit("pas de données en cache : lancez `hrdps-weather refresh`")
-        try:
-            base = hrdps.basemap()
-        except Exception:
-            base = None
+        from .tiles import TileCache
         view.render_png(a.args[0], d, a.args[1] if len(a.args) > 1 else "rt",
-                        int(a.args[2]) if len(a.args) > 2 else 0, hrdps.load_maps(), base)
+                        int(a.args[2]) if len(a.args) > 2 else 0, hrdps.load_maps(), TileCache(hrdps.CACHE), wait=True)
     elif a.command == "popup":
         use_gtk = False
         if not a.tk and sys.platform != "win32":

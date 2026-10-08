@@ -12,17 +12,25 @@ def test_render_without_maps(tmp_path, data, layer):
     assert out.stat().st_size > 20_000                 # a real image, not a blank canvas
 
 
-def test_render_with_synthetic_maps(tmp_path, data):
+def synthetic_maps(T):
     import numpy as np
-    from PIL import Image
-    T, ny, nx = data.n, 40, 40
     rng = np.random.default_rng(0)
-    grids = {k: rng.random((T, ny, nx), dtype=np.float32) for k in ("rt", "tt", "ws", "wd", "nt")}
-    grids["wd"] *= 360
-    grids["nt"] *= 100
-    maps = (grids, (-73.1, 45.1, -68.9, 48.0), "synthetic")
-    out = tmp_path / "maps.png"
-    view.render_png(str(out), data, "ws", 3, maps, Image.new("RGB", (768, 768), (30, 30, 46)))
+
+    def grids(ny, nx):
+        g = {k: rng.random((T, ny, nx), dtype=np.float32) for k in ("rt", "tt", "ws", "wd", "nt")}
+        g["wd"] *= 360
+        g["nt"] *= 100
+        g["tt"] = g["tt"] * 30 - 10
+        return g
+    from hrdps_weather import hrdps
+    return {"region": (grids(40, 40), hrdps.map_bounds(hrdps.REGION_ZOOM)),
+            "wide": (grids(30, 40), hrdps.map_bounds(hrdps.WIDE_ZOOM)), "ref": "synthetic"}
+
+
+@pytest.mark.parametrize("layer", ["rt", "tt", "ws", "nt"])
+def test_render_with_synthetic_maps(tmp_path, data, layer):
+    out = tmp_path / f"maps_{layer}.png"
+    view.render_png(str(out), data, layer, 3, synthetic_maps(data.n))
     assert out.stat().st_size > 20_000
 
 

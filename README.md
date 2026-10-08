@@ -1,8 +1,8 @@
 # hrdps-weather
 
-Météo **100 % HRDPS** (Système à haute résolution de prévision déterministe, Environnement et Changement
-climatique Canada, 2,5 km, 48 h) : carte animée (précipitations, température, vent, nuages), graphiques
-synchronisés, alertes et détails heure par heure.
+Météo d'**Environnement et Changement climatique Canada** : prévisions du **HRDPS** (Système à haute résolution de
+prévision déterministe, 2,5 km, 48 h) et **radar météo** observé. Carte animée (précipitations, température, vent,
+nuages, radar) avec zoom et déplacement, graphiques synchronisés, alertes et détails heure par heure.
 
 - **Linux** : module [waybar](https://github.com/Alexays/Waybar) (et i3blocks, polybar, i3status-rust…) + fenêtre ; binaire prêt à l'emploi.
 - **Windows** : icône dans la zone de notification (température sur l'icône) + fenêtre complète au clic.
@@ -106,8 +106,14 @@ position personnelle ; la vôtre reste dans votre fichier de configuration.
 
 ## Fenêtre
 
-Espace : lecture/pause · ←/→ : ±1 h · ↑/↓ : vitesse · 1–4 : couche de la carte · Home : maintenant · Échap : fermer.
-Glissez le curseur ou survolez un graphique (en pause) pour explorer le temps.
+**Carte** — molette ou boutons **+ / −** : zoom (autour du curseur) ; glisser : déplacer ; double-clic : zoom avant ;
+bouton ◎ ou touche `0` : recentrer. Couches : précipitations, température, vent, nuages (prévision HRDPS) et
+**radar** (observé : les 3 dernières heures, une image toutes les 6 min, pluie et neige ; il se recharge pour la zone
+affichée quand vous déplacez la carte).
+
+**Temps** — espace : lecture/pause · ←/→ : ±1 h · ↑/↓ : vitesse · 1–5 : couche · +/− : zoom · Home : maintenant ·
+Échap : fermer. Glissez le curseur ou survolez un graphique (en pause) pour explorer le temps. En mode radar, le
+curseur parcourt les images du radar ; les graphiques restent sur l'heure choisie.
 
 ## Données, réseau et vie privée
 
@@ -115,12 +121,14 @@ Aucun compte, aucune clé d'API, aucune télémétrie. Seuls deux hôtes sont co
 
 | Hôte | Pourquoi |
 | --- | --- |
-| `geo.weather.gc.ca` (MSC GeoMet) | séries horaires au point et grilles des cartes HRDPS |
-| `tile.openstreetmap.org` | tuiles du fond de carte (9 tuiles, mises en cache sur le disque) |
+| `geo.weather.gc.ca` (MSC GeoMet) | séries horaires au point et grilles de la carte (HRDPS), images du radar |
+| `tile.openstreetmap.org` | tuiles du fond de carte, **à la demande** selon la zone et le zoom affichés (mises en cache sur le disque) |
 
 Votre position n'est envoyée qu'à GeoMet, sous forme d'une petite zone autour du point (comme toute requête WMS).
-Un run complet représente ~1 500 petites requêtes ; le programme ne réinterroge GeoMet que lorsqu'un nouveau run
-existe. Merci de ne pas réduire ce délai.
+Un run complet du HRDPS représente ~1 700 petites requêtes ; le programme ne réinterroge GeoMet que lorsqu'un nouveau
+run existe (la première fois, le téléchargement des grilles de la carte prend ~3–4 min en arrière-plan ; la barre et
+les graphiques sont disponibles avant). Le radar n'est chargé que lorsque vous ouvrez la couche radar (≈ 60 petites
+images). Merci de ne pas réduire ces délais.
 
 Cache : `%LOCALAPPDATA%\hrdps-weather\Cache` (Windows) ou `~/.cache/hrdps-weather` (Linux).
 

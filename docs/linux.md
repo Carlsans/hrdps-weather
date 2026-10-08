@@ -88,6 +88,8 @@ cmd = "hrdps-weather popup"
 
 ## Fenêtre flottante
 
+Carte : molette ou +/− pour zoomer, glisser pour déplacer, couche **Radar** (observé, 3 h) ; voir le README.
+
 La fenêtre a une taille fixe (≈ 1400×924). Sur un gestionnaire en mosaïque, faites-la flotter :
 
 | Version | Identifiant de fenêtre |
