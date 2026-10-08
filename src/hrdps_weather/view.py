@@ -196,8 +196,9 @@ def to_surface(rgba):
 
 # ── The view ─────────────────────────────────────────────────────────────────
 class View:
-    def __init__(self, data, tiles=None):
+    def __init__(self, data, tiles=None, prefetch_radar=False):
         self.d = data
+        self.prefetch_radar = prefetch_radar                       # warm the radar in the background (UI only)
         self.i0, self.i1 = data.now_index(), data.n - 1
         self.t = float(self.i0)
         self.layer, self.playing, self.speed = "rt", True, 2.0       # speed: model hours per second
@@ -395,6 +396,8 @@ class View:
         if self.tiles is not None:
             self._draw_tiles(cr, x, y, w, h)
         lay = self.layer
+        if lay != "radar" and self.prefetch_radar and self.radar is None:
+            self._request_radar(w)                                 # ready by the time the user opens the layer
         if lay == "radar":
             self._draw_radar(cr, x, y, w, h)
         elif self.maps is not None:
@@ -474,11 +477,16 @@ class View:
         to_y = lambda wy: (1 - wy / n * 2) * R
         return (to_x(cx - mw / 2), to_y(cy + mh / 2), to_x(cx + mw / 2), to_y(cy - mh / 2))
 
-    def _draw_radar(self, cr, x, y, w, h):
-        from .radar import RadarLoader, R
+    def _request_radar(self, w):
+        from .radar import RadarLoader, SNOW_BELOW_C
         if self.radar is None:
             self.radar = RadarLoader()
-        self.radar.request(self._view_meters(), self.z, w)
+        cold = (self.d.tt[self.d.now_index()] or 99) < SNOW_BELOW_C          # snow layer only matters when it is cold
+        self.radar.request(self._view_meters(), self.z, w, want_snow=cold)
+
+    def _draw_radar(self, cr, x, y, w, h):
+        from .radar import R
+        self._request_radar(w)
         fr = self.radar.frames
         if not fr:
             msg = "Radar indisponible (réseau ?)" if self.radar.state == "error" else "Chargement du radar…"
@@ -493,12 +501,17 @@ class View:
         cr.save()
         cr.translate(x + w / 2 + (wx0 - cx), y + h / 2 + (wy0 - cy))
         cr.scale((wx1 - wx0) / surf.get_width(), (wy1 - wy0) / surf.get_height())
-        cr.set_source_surface(surf, 0, 0)
-        cr.get_source().set_filter(cairo.FILTER_BILINEAR)
-        cr.paint_with_alpha(0.88)
+        for layer_surf in (surf, self.radar.snow.get(t)):
+            if layer_surf is not None:
+                cr.save()
+                cr.scale(1, 1)
+                cr.set_source_surface(layer_surf, 0, 0)
+                cr.get_source().set_filter(cairo.FILTER_BILINEAR)
+                cr.paint_with_alpha(0.88)
+                cr.restore()
         cr.restore()
         if self.radar.state == "loading":
-            text(cr, "mise à jour…", x + w - 12, y + 44, 11, SUBTLE, False, "r")
+            text(cr, f"images {self.radar.done}/{self.radar.total}…", x + w - 52, y + 44, 11, SUBTLE, False, "r")
 
     def draw_marker(self, cr, x, y, w, h):
         cx, cy = self._center_world()

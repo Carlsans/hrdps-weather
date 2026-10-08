@@ -42,7 +42,7 @@ def run_gtk():
         d = hrdps.load()
         if d is None:
             return None
-        v = wv.View(d, tiles)
+        v = wv.View(d, tiles, prefetch_radar=tiles.network)
         v.status = "Cartes en téléchargement…"
         return v
 

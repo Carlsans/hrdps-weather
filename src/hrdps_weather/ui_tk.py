@@ -68,7 +68,7 @@ class WeatherWindow:
     def _make_view(self):
         d = hrdps.load()
         if d is not None:
-            self.view = wv.View(d, self.tiles)
+            self.view = wv.View(d, self.tiles, prefetch_radar=self.tiles.network)
             self.view.status = "Cartes en téléchargement…"
 
     def _start_maps(self):

@@ -92,25 +92,71 @@ def test_darken_is_dark_and_consistent():
     assert max(land.getpixel((0, 0))) < 80
 
 
-def test_radar_loader_with_fake_network(monkeypatch):
+def png_bytes():
     from PIL import Image
-    png = io.BytesIO()
-    Image.new("RGBA", (16, 16), (0, 200, 0, 180)).save(png, format="PNG")
-    caps = (b'<Layer><Name>RADAR_1KM_RRAI</Name><Dimension name="time" units="ISO8601">'
-            b'2026-10-08T10:48:00Z/2026-10-08T13:48:00Z/PT6M</Dimension></Layer>')
-    monkeypatch.setattr(radar, "_get", lambda url, timeout=30: caps if "GetCapabilities" in url else png.getvalue())
+    buf = io.BytesIO()
+    Image.new("RGBA", (16, 16), (0, 200, 0, 180)).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+CAPS = (b'<Layer><Name>RADAR_1KM_RRAI</Name><Dimension name="time" units="ISO8601">'
+        b'2026-10-08T10:48:00Z/2026-10-08T13:48:00Z/PT6M</Dimension></Layer>')
+
+
+def test_radar_priority_is_newest_first():
+    from datetime import datetime, timedelta, timezone
+    base = datetime(2026, 10, 8, 10, 48, tzinfo=timezone.utc)
+    times = [base + timedelta(minutes=6 * k) for k in range(31)]
+    order = radar.priority(times)
+    assert order[0] == times[-1] and order[1] == times[-3]            # newest, then every other one back
+    assert sorted(order) == times                                     # …and every frame exactly once
+
+
+def test_radar_bucket_is_stable_for_small_pans():
+    R = radar.R
+    a = (-8000000.0, 5600000.0, -7900000.0, 5700000.0)
+    b = (a[0] + 4000, a[1] - 3000, a[2] + 4000, a[3] - 3000)         # a tiny pan
+    c = (a[0] + 90000, a[1], a[2] + 90000, a[3])                      # a big pan
+    ka, kb, kc = (radar.bucket(v, 8.0, 560)[2] for v in (a, b, c))
+    assert ka == kb and ka != kc
+    bbox, px, _ = radar.bucket(a, 8.0, 560)
+    assert bbox[0] < a[0] and bbox[2] > a[2] and px == 784            # loaded frame covers the view with a margin
+
+
+def test_radar_loader_progressive_disk_cache_and_snow(monkeypatch, tmp_path):
+    png = png_bytes()
+    calls = []
+
+    def fake_get(url, timeout=30):
+        if "GetCapabilities" in url:
+            return CAPS
+        calls.append("RSNO" if "RADAR_1KM_RSNO" in url else "RRAI")
+        return png
+    monkeypatch.setattr(radar, "_get", fake_get)
     times = radar.frame_times()
     assert len(times) == 31 and (times[-1] - times[0]).total_seconds() == 3 * 3600
-    rl = radar.RadarLoader()
+
+    rl = radar.RadarLoader(tmp_path)
     bbox = (-8000000.0, 5600000.0, -7800000.0, 5800000.0)
-    rl.request(bbox, 8.0, 560)
+    rl.request(bbox, 8.0, 560)                                        # warm weather: rain only
     rl.wait(20)
-    assert len(rl.frames) == 31 and rl.state == "idle"
-    assert rl.bbox[0] <= bbox[0] and rl.bbox[2] >= bbox[2]      # loaded area includes the view (with margin)
+    assert len(rl.frames) == 31 and rl.state == "idle" and not rl.snow
+    assert calls.count("RRAI") == 31 and "RSNO" not in calls
+    assert rl.bbox[0] <= bbox[0] and rl.bbox[2] >= bbox[2]
+    assert [f[0] for f in rl.frames] == sorted(f[0] for f in rl.frames)
+
     before = rl.version
-    rl.request(bbox, 8.0, 560)                                  # covered: no reload
+    rl.request(bbox, 8.0, 560)                                        # covered: nothing to do
     time.sleep(0.8)
     assert rl.version == before
+
+    calls.clear()                                                     # a fresh loader (e.g. popup reopened)
+    rl2 = radar.RadarLoader(tmp_path)
+    rl2.request(bbox, 8.0, 560, want_snow=True)                       # cold: snow too
+    rl2.wait(20)
+    assert len(rl2.frames) == 31 and len(rl2.snow) == 31
+    assert calls.count("RRAI") == 0                                   # all rain frames came from the disk cache
+    assert calls.count("RSNO") == 31
 
 
 def test_radar_layer_draws_and_slider(tmp_path, data, monkeypatch):
@@ -118,7 +164,7 @@ def test_radar_layer_draws_and_slider(tmp_path, data, monkeypatch):
     from cairo import ImageSurface, Context, FORMAT_ARGB32
     v = make_view(data)
     v.layer = "radar"
-    v.radar = radar.RadarLoader()
+    v.radar = radar.RadarLoader(tmp_path)
     surf16 = tiles.pil_to_surface(Image.new("RGBA", (16, 16), (0, 200, 0, 180)))
     from datetime import datetime, timedelta, timezone
     now = datetime(2026, 10, 8, 13, 48, tzinfo=timezone.utc)
@@ -133,3 +179,18 @@ def test_radar_layer_draws_and_slider(tmp_path, data, monkeypatch):
     assert "dernière image" in v._time_label()
     v.tick(0.5)                                                  # radar advances on its own clock, model time untouched
     assert v.t == float(v.i0)
+
+
+def test_radar_is_prefetched_only_when_enabled(tmp_path, data, monkeypatch):
+    from cairo import ImageSurface, Context, FORMAT_ARGB32
+    asked = []
+    monkeypatch.setattr(radar.RadarLoader, "request", lambda self, *a, **k: asked.append(a))
+    s = ImageSurface(FORMAT_ARGB32, view.W, view.H)
+    v = make_view(data)                                          # default: no prefetch (tests, selftest, png)
+    v.draw(Context(s), view.W, view.H)
+    assert v.radar is None and not asked
+    v2 = view.View(data, prefetch_radar=True)
+    v2.draw(Context(s), view.W, view.H)
+    assert v2.radar is not None and len(asked) == 1              # requested once, on a model layer
+    v2.draw(Context(s), view.W, view.H)
+    assert len(asked) == 1

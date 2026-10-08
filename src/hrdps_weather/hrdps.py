@@ -10,13 +10,13 @@ WCS GetCoverage for map grids). No other weather source is used.
 
 Cache: ~/.cache/waybar-weather/
 """
-import json, math, os, re, subprocess, sys, time, urllib.request
+import json, math, os, re, subprocess, sys, time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from . import __version__, config
+from . import __version__, config, net
 
 # ── Configuration (see config.py: config.toml in the user config directory) ──
 _cfg     = config.load()
@@ -56,15 +56,7 @@ MAP_LAYERS = {"rt": C+"RT", "tt": C+"TT", "ws": C+"WSPD", "wd": C+"WD", "nt": C+
 
 # ── HTTP ─────────────────────────────────────────────────────────────────────
 def _get(url, timeout=30, tries=2):
-    for i in range(tries):
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": UA})
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                return r.read()
-        except Exception:
-            if i == tries - 1:
-                return None
-            time.sleep(0.5)
+    return net.get(url, UA, timeout, tries)
 
 def _feature(layer, t):
     """-> (value, class) | 'empty' | None (network error)"""
@@ -102,7 +94,7 @@ def latest_ref():
 def _fetch_series(ref):
     times = [ref + timedelta(hours=i) for i in range(HOURS + 1)]
     jobs = [(k, i) for k in POINT_LAYERS for i in range(len(times))]
-    with ThreadPoolExecutor(12) as ex:
+    with ThreadPoolExecutor(8) as ex:
         res = list(ex.map(lambda j: _feature(POINT_LAYERS[j[0]], times[j[1]]), jobs))
     # A failed request (network blip, 5xx) comes back as None; retry those cells before giving up on them.
     # Cells that stay None are interpolated by Data (see _fill). Some are legitimately None (e.g. the first
