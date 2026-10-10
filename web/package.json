@@ -1,0 +1,9 @@
+{
+  "name": "hrdps-weather-web",
+  "private": true,
+  "type": "module",
+  "description": "Installable web app (PWA) of hrdps-weather. No dependencies, no build step.",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs"
+  }
+}

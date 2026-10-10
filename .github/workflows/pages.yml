@@ -1,0 +1,56 @@
+name: Web app (GitHub Pages)
+
+# Publishes web/ — the installable web app for Android, iPhone and any browser — at
+# https://carlsans.github.io/hrdps-weather/ on every push to main that touches it.
+# One-time setup: repository Settings → Pages → Source: "GitHub Actions".
+
+on:
+  push:
+    branches: [main]
+    paths: ["web/**", "src/hrdps_weather/hrdps.py", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Cairo headers
+        run: sudo apt-get update && sudo apt-get install -y libcairo2-dev pkg-config python3-dev
+      - run: python -m pip install -e .
+      - name: Web data layer matches the Python one
+        run: |
+          python web/tests/make_expected.py "$RUNNER_TEMP/expected.json"
+          cd web && EXPECTED="$RUNNER_TEMP/expected.json" node --test "tests/*.test.mjs"
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Stamp the build (a new service worker = the app offers to reload)
+        run: |
+          sed -i "s/const BUILD = \"dev\";/const BUILD = \"${GITHUB_SHA::7}\";/" web/sw.js
+          grep -q "const BUILD = \"${GITHUB_SHA::7}\";" web/sw.js
+          rm -rf web/tests web/package.json
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: web }
+      - id: deployment
+        uses: actions/deploy-pages@v4

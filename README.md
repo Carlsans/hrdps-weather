@@ -6,6 +6,8 @@ nuages, radar) avec zoom et déplacement, graphiques synchronisés, alertes et d
 
 - **Linux** : module [waybar](https://github.com/Alexays/Waybar) (et i3blocks, polybar, i3status-rust…) + fenêtre ; binaire prêt à l'emploi.
 - **Windows** : icône dans la zone de notification (température sur l'icône) + fenêtre complète au clic.
+- **Android** (et iPhone, tablette, tout navigateur) : application web installable —
+  **<https://carlsans.github.io/hrdps-weather/>**.
 
 ## Installation
 
@@ -51,6 +53,21 @@ hrdps-weather-tray          # lance l'icône (aucune fenêtre de console)
 
 > Le premier lancement télécharge un run complet (~1 min). Ensuite, tout est mis à jour en arrière-plan à chaque
 > nouveau run du modèle (4 fois par jour).
+
+### Android (et iPhone, tablette, navigateur)
+
+Ouvrez **<https://carlsans.github.io/hrdps-weather/>** dans Chrome, puis menu **⋮ → Installer l'application**
+(ou *Ajouter à l'écran d'accueil*) ; sur iPhone : Safari → Partager → *Sur l'écran d'accueil*. Rien à télécharger
+depuis un magasin d'applications, aucune permission à accorder : la position GPS n'est demandée que si vous touchez
+*Utiliser ma position* (sinon, entrez la latitude et la longitude).
+
+C'est la même application que la fenêtre de bureau, réécrite pour le navigateur (`web/`, sans dépendance) : carte
+animée avec les cinq couches et le radar (pincer pour zoomer, double-toucher, glisser), les cinq graphiques (toucher
+ou glisser horizontalement pour parcourir le temps), alertes, détails heure par heure. Les données sont gardées sur
+l'appareil : l'application s'ouvre hors ligne sur le dernier run téléchargé. Elle cherche un nouveau run quand elle
+est ouverte (la première fois, ~1–2 minutes pour la série au point, puis ~1 minute pour les cartes) ; elle ne
+télécharge rien en arrière-plan une fois fermée. Les nouvelles versions s'installent d'elles-mêmes : un bandeau
+propose de recharger.
 
 ### Linux
 
@@ -123,6 +140,7 @@ Aucun compte, aucune clé d'API, aucune télémétrie. Seuls deux hôtes sont co
 | --- | --- |
 | `geo.weather.gc.ca` (MSC GeoMet) | séries horaires au point et grilles de la carte (HRDPS), images du radar |
 | `tile.openstreetmap.org` | tuiles du fond de carte, **à la demande** selon la zone et le zoom affichés (mises en cache sur le disque) |
+| `carlsans.github.io` | application web seulement : ses propres fichiers (GitHub Pages) |
 
 Votre position n'est envoyée qu'à GeoMet, sous forme d'une petite zone autour du point (comme toute requête WMS).
 Un run complet du HRDPS représente ~1 700 petites requêtes ; le programme ne réinterroge GeoMet que lorsqu'un nouveau
@@ -184,7 +202,14 @@ pytest
 hrdps-weather selftest                   # vérification hors ligne
 hrdps-weather png meteo.png rt 6         # image fixe, 6 h dans le futur
 pip install -e ".[build]" && pyinstaller packaging/hrdps-weather.spec --clean --noconfirm   # Windows
+
+# application web : aucun outil de compilation, servir le dossier web/ suffit
+python -m http.server 8000 --directory web                     # puis http://localhost:8000
+python web/tests/make_expected.py expected.json && (cd web && EXPECTED=../expected.json node --test "tests/*.test.mjs")
 ```
+
+Les tests web comparent la couche de données JavaScript (`web/js/hrdps.js`) au Python sur le même run : séries
+dérivées, icônes, alertes, dates, textes. Toute modification de `hrdps.py` doit être reportée dans `hrdps.js`.
 
 ## Attributions
 

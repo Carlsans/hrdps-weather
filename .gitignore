@@ -6,3 +6,5 @@ build/
 .venv/
 *.png
 !docs/*.png
+!web/icons/*.png
+web/tests/_no_config/

@@ -18,7 +18,22 @@ def draw(size=256):
     return im
 
 
+def maskable(size=512):
+    """Android adaptive icon: full-bleed background, artwork inside the 80 % safe zone."""
+    im = Image.new("RGBA", (size, size), (30, 30, 46, 255))
+    art = draw(1024).resize((int(size * 0.86),) * 2, Image.LANCZOS)
+    im.alpha_composite(art, ((size - art.width) // 2,) * 2)
+    return im
+
+
 if __name__ == "__main__":
     out = Path(__file__).with_name("icon.ico")
     draw().save(out, sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
     print(out)
+    web = Path(__file__).parent.parent / "web" / "icons"                 # the installable web app (PWA)
+    web.mkdir(exist_ok=True)
+    for name, im in (("icon-192.png", draw(1024).resize((192, 192), Image.LANCZOS)),
+                     ("icon-512.png", draw(1024).resize((512, 512), Image.LANCZOS)),
+                     ("icon-maskable-512.png", maskable())):
+        im.save(web / name, optimize=True)
+        print(web / name)
