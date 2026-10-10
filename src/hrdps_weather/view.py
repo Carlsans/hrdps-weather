@@ -5,6 +5,7 @@ Pure drawing code: used by the GTK popup and by `--png` export for testing.
 import math
 import os
 import sys
+import time
 
 import cairo
 
@@ -250,6 +251,36 @@ class View:
         if maps:
             self.maps = maps
         self.status = ""
+
+    def set_data(self, data):
+        """Show `data` (a newer run, or the same one at a new hour): the cursor keeps its offset from "now";
+        the map grids of an older run are dropped until the new run's grids are loaded."""
+        new_run = data.raw["ref"] != self.d.raw["ref"]
+        off = self.t - self.i0
+        self.d = data
+        self.i0, self.i1 = data.now_index(), data.n - 1
+        self.t = float(min(max(self.i0 + off, self.i0), self.i1))
+        if new_run:
+            self.maps = None
+            self.status = "Cartes en téléchargement…"
+
+    def follow(self, every=30.0):
+        """Called on every frame by the windows; every `every` seconds, pick up a run that the background
+        refresh downloaded meanwhile, and move "now" when the hour changes. True when the view changed."""
+        now = time.monotonic()
+        if now - getattr(self, "_followed", 0.0) < every:
+            return False
+        self._followed = now
+        ref = hrdps._state().get("ref")
+        if ref and ref != self.d.raw["ref"]:
+            d = hrdps.load()
+            if d is not None and d.raw["ref"] != self.d.raw["ref"]:
+                self.set_data(d)
+                return True
+        if self.d.now_index() != self.i0:
+            self.set_data(self.d)
+            return True
+        return False
 
     @staticmethod
     def _grid_sample(arr, bounds, lon2, lat2):

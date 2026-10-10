@@ -84,9 +84,13 @@ class WeatherWindow:
             return
         self.loading = True
 
+        ref = v.d.raw["ref"]
+
         def work():
             try:
-                v.set_maps(hrdps.load_maps())
+                maps = hrdps.load_maps()
+                if v.d.raw["ref"] == ref:                # not if a newer run replaced the data meanwhile
+                    v.set_maps(maps)
             finally:
                 self.loading = False
         threading.Thread(target=work, daemon=True).start()
@@ -99,6 +103,8 @@ class WeatherWindow:
         if self.view is None:
             self._make_view()
         else:
+            if self.view.follow():                       # a newer run, or a new hour, while the window stays open
+                self._dirty = True
             if self.view.maps is None:
                 self._start_maps()
             self.view.tick(t0 - self._last)

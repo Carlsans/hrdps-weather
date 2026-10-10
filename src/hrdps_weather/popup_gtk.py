@@ -59,9 +59,12 @@ def run_gtk():
         if v is None or state["loading"] or v.maps is not None or not hrdps.maps_ready(v.d):
             return
         state["loading"] = True
+        ref = v.d.raw["ref"]
         def work():
             try:
-                v.set_maps(hrdps.load_maps())
+                maps = hrdps.load_maps()
+                if v.d.raw["ref"] == ref:                # not if a newer run replaced the data meanwhile
+                    v.set_maps(maps)
             finally:
                 state["loading"] = False
                 GLib.idle_add(redraw)
@@ -200,6 +203,8 @@ def run_gtk():
             if v is None:
                 state["view"] = make_view(); redraw()
             else:
+                if v.follow():                             # a newer run, or a new hour, while the window stays open
+                    redraw()
                 if v.maps is None:
                     start_maps()
                 if v.playing:
