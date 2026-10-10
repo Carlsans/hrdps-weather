@@ -409,6 +409,11 @@ function keyboard() {
 }
 
 // ── settings ─────────────────────────────────────────────────────────────────
+/** Inside the Android app (android/), hand the place to the home-screen widget. */
+function tellAndroid() {
+  try { window.HrdpsAndroid?.setPlace(JSON.stringify(app.cfg)); } catch { /* not in the Android app */ }
+}
+
 function openSettings(first = false) {
   const dlg = $("settings"), f = $("settings-form"), c = app.cfg || { ...config.DEFAULTS, timezone: config.deviceTimezone() };
   f.location.value = c.location; f.latitude.value = c.latitude; f.longitude.value = c.longitude; f.timezone.value = c.timezone;
@@ -443,6 +448,7 @@ function settingsDialog() {
     if (msg) { err.textContent = msg; return; }
     const before = app.cfg;
     app.cfg = config.save(c);
+    tellAndroid();
     dlg.close();
     if (!before) return;                                    // first launch: main() carries on
     if (!config.samePlace(before, app.cfg) || before.timezone !== app.cfg.timezone) await changePlace();
@@ -493,6 +499,12 @@ async function main() {
   mapInput(); sliderInput(); chartInput(); keyboard(); settingsDialog();
   $("place-btn").addEventListener("click", () => openSettings(false));
   $("refresh").addEventListener("click", () => refresh(true));
+  try {                                                             // Android app: offer to add the widget
+    if (window.HrdpsAndroid?.canPinWidget?.()) {
+      $("pin-widget").hidden = false;
+      $("pin-widget").addEventListener("click", () => window.HrdpsAndroid.pinWidget());
+    }
+  } catch { /* not in the Android app */ }
   $("play").addEventListener("click", () => { if (app.view) { app.view.playing = !app.view.playing; app.dirty = true; } });
   $("speed").addEventListener("click", () => {
     const v = app.view;
@@ -516,6 +528,7 @@ async function main() {
     if (!app.cfg) return;
     $("empty-text").textContent = "Téléchargement des données HRDPS… (~1 à 2 minutes la première fois)";
   }
+  tellAndroid();
   await loadCache();
   updateHeader();
   syncLayerButtons();

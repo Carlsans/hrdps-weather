@@ -8,3 +8,12 @@ build/
 !docs/*.png
 !web/icons/*.png
 web/tests/_no_config/
+
+# Android build outputs and local SDK path
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+*.jks
+*.keystore
+!android/app/src/main/res/**/*.png

@@ -6,8 +6,8 @@ nuages, radar) avec zoom et déplacement, graphiques synchronisés, alertes et d
 
 - **Linux** : module [waybar](https://github.com/Alexays/Waybar) (et i3blocks, polybar, i3status-rust…) + fenêtre ; binaire prêt à l'emploi.
 - **Windows** : icône dans la zone de notification (température sur l'icône) + fenêtre complète au clic.
-- **Android** (et iPhone, tablette, tout navigateur) : application web installable —
-  **<https://carlsans.github.io/hrdps-weather/>**.
+- **Android** : application avec **widget d'écran d'accueil** (APK), ou application web installable depuis le
+  navigateur — **<https://carlsans.github.io/hrdps-weather/>** (aussi pour iPhone, tablette, ordinateur).
 
 ## Installation
 
@@ -54,7 +54,24 @@ hrdps-weather-tray          # lance l'icône (aucune fenêtre de console)
 > Le premier lancement télécharge un run complet (~1 min). Ensuite, tout est mis à jour en arrière-plan à chaque
 > nouveau run du modèle (4 fois par jour).
 
-### Android (et iPhone, tablette, navigateur)
+### Android — application avec widget (APK)
+
+Téléchargez `hrdps-weather-android.apk` depuis la page
+[Releases](https://github.com/Carlsans/hrdps-weather/releases/latest) sur le téléphone et ouvrez-le (Android
+demande d'autoriser l'installation depuis le navigateur : c'est une application hors Play Store). Choisissez votre
+position au premier lancement, puis ajoutez le **widget** : appui long sur l'écran d'accueil → *Widgets* →
+*Météo HRDPS*. Il affiche l'icône et la température actuelles, le ciel, le ressenti et la prochaine précipitation
+(« Neige vers 15h · 4,2 mm d'ici 12 h ») ; le toucher ouvre l'application.
+
+- L'application est l'application web ci-dessous dans une fenêtre Android : elle se met à jour toute seule.
+- Le widget se rafraîchit environ toutes les 30 minutes en arrière-plan, quand le réseau est disponible : ~30
+  petites requêtes GeoMet par heure (valeurs au point pour l'heure courante et cumul des 12 heures suivantes),
+  aucune quand ni le run ni l'heure n'ont changé.
+- Permissions : Internet ; la position seulement si vous touchez *Utiliser ma position*.
+- L'APK est signé (certificat SHA-256 `6a:cf:23:46:f4:8b:a0:d3:cc:74:9a:0b:d5:14:dd:9b:01:41:b7:d0:8b:68:0b:41:54:ea:db:52:72:6a:6f:6a`)
+  et son empreinte est publiée avec la release (`SHA256SUMS-android.txt`, signé Ed25519 comme les autres).
+
+### Android sans APK, iPhone, tablette, navigateur
 
 Ouvrez **<https://carlsans.github.io/hrdps-weather/>** dans Chrome, puis menu **⋮ → Installer l'application**
 (ou *Ajouter à l'écran d'accueil*) ; sur iPhone : Safari → Partager → *Sur l'écran d'accueil*. Rien à télécharger
@@ -206,10 +223,14 @@ pip install -e ".[build]" && pyinstaller packaging/hrdps-weather.spec --clean --
 # application web : aucun outil de compilation, servir le dossier web/ suffit
 python -m http.server 8000 --directory web                     # puis http://localhost:8000
 python web/tests/make_expected.py expected.json && (cd web && EXPECTED=../expected.json node --test "tests/*.test.mjs")
+
+# Android (JDK 17 + SDK Android) : tests du widget (comparés au Python) et APK
+cd android && EXPECTED=../expected.json ./gradlew testReleaseUnitTest assembleRelease
 ```
 
 Les tests web comparent la couche de données JavaScript (`web/js/hrdps.js`) au Python sur le même run : séries
-dérivées, icônes, alertes, dates, textes. Toute modification de `hrdps.py` doit être reportée dans `hrdps.js`.
+dérivées, icônes, alertes, dates, textes ; ceux d'Android font de même pour la logique du widget
+(`android/.../Forecast.kt`). Toute modification de `hrdps.py` doit être reportée dans `hrdps.js` et `Forecast.kt`.
 
 ## Attributions
 

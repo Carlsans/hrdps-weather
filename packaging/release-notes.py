@@ -3,6 +3,7 @@
 
     python packaging/release-notes.py TAG linux SHA256SUMS-linux.txt
     python packaging/release-notes.py TAG windows SHA256SUMS.txt
+    python packaging/release-notes.py TAG android SHA256SUMS-android.txt
 
 The Windows and Linux workflows run independently and both edit the same release body, so each owns
 a block between <!-- name --> / <!-- /name --> markers. The edit is re-read and retried because the
@@ -13,7 +14,8 @@ import subprocess
 import sys
 import time
 
-TITLES = {"linux": "Linux (x86_64, aarch64)", "windows": "Windows (unsigned — see the README for SmartScreen / Defender)"}
+TITLES = {"linux": "Linux (x86_64, aarch64)", "windows": "Windows (unsigned — see the README for SmartScreen / Defender)",
+          "android": "Android (APK : application + widget)"}
 
 
 def gh(*args):

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Météo HRDPS</string>
+    <string name="widget_name">Météo HRDPS</string>
+    <string name="widget_description">Conditions actuelles et prochaines précipitations (HRDPS, Environnement Canada)</string>
+</resources>
