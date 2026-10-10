@@ -658,7 +658,7 @@ class View:
             cr.set_source_rgb(*BLUE); rrect(cr, sx, ty - 2, max(12, frac * sw), 12, 6); cr.fill()
             for k in range(self.i0, self.i1 + 1):                 # midnight ticks
                 if self.d.local[k].hour == 0:
-                    px = sx + (k - self.i0) / (self.i1 - self.i0) * sw
+                    px = sx + (k - self.i0) / max(self.i1 - self.i0, 1) * sw
                     cr.set_source_rgba(*TEXT, 0.5); cr.rectangle(px - 0.5, ty - 6, 1, 20); cr.fill()
                     text(cr, hrdps.fr(self.d.local[k], "%a"), px + 3, ty + 12, 10, MUTED)
         cr.set_source_rgb(*TEXT); cr.arc(sx + frac * sw, ty + 4, 9, 0, 2 * math.pi); cr.fill()
@@ -671,7 +671,7 @@ class View:
         px0, px1 = cx + 48, cx + cw - 46
         pw = px1 - px0
         i0, i1 = self.i0, self.i1
-        X = lambda t: px0 + (t - i0) / (i1 - i0) * pw
+        X = lambda t: px0 + (t - i0) / max(i1 - i0, 1) * pw     # i0 == i1 when the cached run is stale
         rng = range(i0, i1 + 1)
         gaps = 26
         fr = [0.24, 0.28, 0.20, 0.14, 0.14]

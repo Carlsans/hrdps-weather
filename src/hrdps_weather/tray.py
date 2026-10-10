@@ -222,14 +222,14 @@ def run(minimized=False):
 
     stop = threading.Event()
 
-    def updater():
+    def icon_loop():                                                # not "updater": that name is the upd.Updater above
         while not stop.is_set():
             try:
                 refresh_icon(icon)
             except Exception:
                 pass
             stop.wait(REFRESH_EVERY)
-    threading.Thread(target=updater, daemon=True).start()
+    threading.Thread(target=icon_loop, daemon=True).start()
 
     def poll():
         try:
