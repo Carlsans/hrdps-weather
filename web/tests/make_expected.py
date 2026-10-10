@@ -34,6 +34,7 @@ def main(path):
         "describe": [d.describe(i) for i in rng],
         "is_day": [d.is_day(i) for i in rng],
         "alerts": [d.alerts(i) for i in rng],
+        "alerts12": [d.alerts(i, 12) for i in rng],                # the large Android widget's window
         "fmt": [[hrdps.fr(d.local[i], p) for p in ("%a %Hh", "%a %d %b %Hh", "%A %d %B · %Hh", "%a %d", "%Hh%M")]
                 for i in rng],
         "fixed": [[f"{d.tt[i]:.0f}", f"{d.tt[i]:.1f}", f"{d.ws[i]:.0f}", f"{d.pr[i]:.2f}", f"{d.slp[i]:.1f}"] for i in rng],

@@ -59,14 +59,20 @@ hrdps-weather-tray          # lance l'icône (aucune fenêtre de console)
 Téléchargez `hrdps-weather-android.apk` depuis la page
 [Releases](https://github.com/Carlsans/hrdps-weather/releases/latest) sur le téléphone et ouvrez-le (Android
 demande d'autoriser l'installation depuis le navigateur : c'est une application hors Play Store). Choisissez votre
-position au premier lancement, puis ajoutez le **widget** : appui long sur l'écran d'accueil → *Widgets* →
-*Météo HRDPS*. Il affiche l'icône et la température actuelles, le ciel, le ressenti et la prochaine précipitation
-(« Neige vers 15h · 4,2 mm d'ici 12 h ») ; le toucher ouvre l'application.
+position au premier lancement, puis ajoutez un **widget** avec les boutons en bas de l'application (ou appui long
+sur l'écran d'accueil → *Widgets* → *Météo HRDPS*) ; le toucher ouvre l'application. Deux tailles, utilisables
+ensemble :
+
+- **3×2** : icône et température actuelles, ciel, ressenti, prochaine précipitation
+  (« Neige vers 15h · 4,2 mm d'ici 12 h ») ;
+- **4×3, détaillé** : la même chose, plus le vent, les rafales et l'humidité, les **alertes des 12 prochaines
+  heures** (mêmes règles que la fenêtre de bureau : verglas, grésil, rafales, forte pluie, neige, gel, orage) et
+  une **bande horaire** jusqu'à +12 h (icône, température, millimètres ou probabilité toutes les 2 heures).
 
 - L'application est l'application web ci-dessous dans une fenêtre Android : elle se met à jour toute seule.
-- Le widget se rafraîchit environ toutes les 30 minutes en arrière-plan, quand le réseau est disponible : ~30
-  petites requêtes GeoMet par heure (valeurs au point pour l'heure courante et cumul des 12 heures suivantes),
-  aucune quand ni le run ni l'heure n'ont changé.
+- Les widgets se rafraîchissent environ toutes les 30 minutes en arrière-plan, quand le réseau est disponible, et
+  seulement si le run ou l'heure a changé : ~30 petites requêtes GeoMet par heure avec le widget 3×2, ~170 avec le
+  4×3 (valeurs au point heure par heure sur 12 h), soit quelques Mo par jour.
 - Permissions : Internet ; la position seulement si vous touchez *Utiliser ma position*.
 - L'APK est signé (certificat SHA-256 `6a:cf:23:46:f4:8b:a0:d3:cc:74:9a:0b:d5:14:dd:9b:01:41:b7:d0:8b:68:0b:41:54:ea:db:52:72:6a:6f:6a`)
   et son empreinte est publiée avec la release (`SHA256SUMS-android.txt`, signé Ed25519 comme les autres).

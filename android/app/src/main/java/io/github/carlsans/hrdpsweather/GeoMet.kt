@@ -27,8 +27,11 @@ object GeoMet {
         "acc_pr" to C + "PR", "acc_rn" to C + "RN", "acc_sn" to C + "SN", "acc_fr" to C + "FR", "acc_pe" to C + "PE",
         "ptype" to W + "DominantPrecipType", "tsprob" to W + "Thunderstorm-Prob", "pint" to W + "TotalPrecipIntensityIndex",
         "fogvis" to W + "LiquidFogVisibility",
+        "hr" to C + "HR", "ws" to C + "WSPD", "wd" to C + "WD", "wgx" to C + "WGX", "pop" to W + "Precip-Prob",
     )
     private val EMPTY_IS_ZERO = setOf("acc_pr", "acc_rn", "acc_sn", "acc_fr", "acc_pe", "rt", "tsprob")
+    const val SLOT_STEP = 2                    // large widget: one column every 2 h…
+    const val SLOTS = 6                        // …up to +12 h
     private val LABEL_KEYS = setOf("ptype", "pint")
     private val ISO = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'").withZone(ZoneId.of("UTC"))
     private const val UA = "hrdps-weather-android (+https://github.com/Carlsans/hrdps-weather)"
@@ -91,19 +94,32 @@ object GeoMet {
 
     /** Which (key, hour) cells the widget needs for hour i: the current hour, the hour before (hourly amounts
      *  come from cumulative layers) and the cumulative precipitation over the next AHEAD hours. */
-    fun cellsFor(i: Int): List<Pair<String, Int>> {
-        val out = mutableListOf<Pair<String, Int>>()
-        for (h in maxOf(i - 1, 0)..minOf(i + AHEAD, HOURS)) out += "acc_pr" to h
+    fun cellsFor(i: Int, detailed: Boolean = false): List<Pair<String, Int>> {
+        val end = minOf(i + AHEAD, HOURS)
+        val out = linkedSetOf<Pair<String, Int>>()
+        for (h in maxOf(i - 1, 0)..end) out += "acc_pr" to h
         for (k in listOf("acc_rn", "acc_sn", "acc_fr", "acc_pe")) for (h in maxOf(i - 1, 0)..i) out += k to h
         for (k in listOf("tt", "re", "nt", "rt", "tsprob", "fogvis", "ptype", "pint")) out += k to i
-        return out
+        if (detailed) {
+            // the large widget: 12-hour alerts (kind, gusts, rain/snow, frost, storms hour by hour), wind and
+            // humidity now, and icon / temperature / probability for each column of the hourly strip
+            for (k in listOf("acc_rn", "acc_sn", "acc_fr", "acc_pe")) for (h in maxOf(i - 1, 0)..end) out += k to h
+            for (k in listOf("tt", "ws", "wgx", "tsprob", "rt")) for (h in i..end) out += k to h
+            for (h in slots(i) + i) for (k in listOf("nt", "fogvis", "ptype", "pint", "pop")) out += k to h
+            for (k in listOf("hr", "wd")) out += k to i
+        }
+        return out.toList()
     }
 
+    /** Hours shown in the large widget's strip. */
+    fun slots(i: Int): List<Int> = (1..SLOTS).map { i + it * SLOT_STEP }.filter { it <= HOURS }
+
     /** Download the cells for the current hour of run `ref` and build a sparse Forecast around it. */
-    suspend fun fetch(ref: Instant, lat: Double, lon: Double, now: Instant = Instant.now()): Forecast? = withContext(Dispatchers.IO) {
+    suspend fun fetch(ref: Instant, lat: Double, lon: Double, now: Instant = Instant.now(), detailed: Boolean = false): Forecast? =
+        withContext(Dispatchers.IO) {
         val times = (0..HOURS).map { ref.plus(it.toLong(), ChronoUnit.HOURS) }
         val i = Math.floorDiv(now.epochSecond / 3600 * 3600 - ref.epochSecond, 3600L).toInt().coerceIn(0, HOURS)
-        val cells = cellsFor(i)
+        val cells = cellsFor(i, detailed)
         val gate = Semaphore(4)                                         // gentle with GeoMet
         val res = coroutineScope {
             cells.map { (k, h) -> async { gate.withPermit { feature(LAYERS.getValue(k), times[h], lat, lon) } } }.awaitAll()

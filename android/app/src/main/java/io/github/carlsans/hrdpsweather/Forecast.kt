@@ -1,5 +1,7 @@
 package io.github.carlsans.hrdpsweather
 
+import java.math.BigDecimal
+import java.math.RoundingMode
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
@@ -40,6 +42,13 @@ class Forecast(
     val pel: List<Double> = diff(s("acc_pe"))
     val ptype: List<String> = l("ptype").map { x -> if (!x.isNullOrEmpty()) PTYPE_FR[x] ?: x else "Aucune" }
     val pint: List<String> = l("pint").map { x -> if (!x.isNullOrEmpty()) PINT_FR[x] ?: x else "" }
+    val hr: List<Double?> = fill(s("hr"))
+    val ws: List<Double?> = fill(s("ws").map { it?.times(3.6) })                 // km/h
+    val wd: List<Double?> = fill(s("wd"))
+    // GeoMet leaves the gust layer empty when gusts do not exceed the mean wind
+    val gust: List<Double?> = s("wgx").mapIndexed { i, g -> val w = ws[i]; if (g != null && w != null) max(g * 3.6, w) else w }
+    val pop: List<Double> = s("pop").map { it ?: 0.0 }
+    val snowCm: List<Double> get() = swe                                          // ≈10:1: 1 mm SWE ≈ 1 cm
 
     fun nowIndex(now: Instant = Instant.now()): Int {
         val hours = Math.floorDiv(now.epochSecond / 3600 * 3600 - times[0].epochSecond, 3600L).toInt()
@@ -97,7 +106,48 @@ class Forecast(
 
     fun local(i: Int, zone: ZoneId): ZonedDateTime = times[i].atZone(zone)
 
+    /** [(text, hour)] for noteworthy conditions in the next `hours` hours (hrdps.Data.alerts). */
+    fun alerts(i0: Int, hours: Int, zone: ZoneId): List<Pair<String, Int>> {
+        val r = (i0 until minOf(i0 + hours, n)).toList()
+        fun whenAt(i: Int) = fr(local(i, zone), "%a %Hh")
+        fun argmax(key: (Int) -> Double) = r.reduce { b, i -> if (key(i) > key(b)) i else b }
+        val out = mutableListOf<Pair<String, Int>>()
+        r.firstOrNull { kind(it) == "frz" }?.let { out += "Pluie verglaçante · ${whenAt(it)}" to it }
+        r.firstOrNull { kind(it) == "pel" }?.let { out += "Grésil · ${whenAt(it)}" to it }
+        val g = argmax { gust[it] ?: 0.0 }
+        if ((gust[g] ?: 0.0) >= 60) out += "Rafales ${fx(gust[g]!!)} km/h · ${whenAt(g)}" to g
+        val p = argmax { rain[it] }
+        if (rain[p] >= 5) out += "Forte pluie ${fx(rain[p], 1)} mm/h · ${whenAt(p)}" to p
+        val sn = argmax { snowCm[it] }
+        if (snowCm[sn] >= 2) out += "Neige ~${fx(snowCm[sn], 1)} cm/h · ${whenAt(sn)}" to sn
+        val t = r.reduce { b, i -> if ((tt[i] ?: 99.0) < (tt[b] ?: 99.0)) i else b }
+        tt[t]?.let { if (it <= 0) out += "Gel ${fx(it)}° · ${whenAt(t)}" to t }
+        val o = argmax { tsprob[it] }
+        if (tsprob[o] >= 30) out += "Orage ${fx(tsprob[o])}% · ${whenAt(o)}" to o
+        return out
+    }
+
     companion object {
+        private val DAYS = listOf("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")
+        private val MONTHS = listOf("janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août",
+            "septembre", "octobre", "novembre", "décembre")
+        private val COMPASS = listOf("N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSO", "SO", "OSO", "O", "ONO", "NO", "NNO")
+
+        /** strftime with French names (hrdps.fr): %A %a %B %d %H %M. */
+        fun fr(t: ZonedDateTime, pattern: String): String {
+            val d = DAYS[t.dayOfWeek.value - 1]
+            return pattern.replace("%A", d).replace("%a", d.take(3)).replace("%B", MONTHS[t.monthValue - 1])
+                .replace("%d", "%02d".format(t.dayOfMonth)).replace("%H", "%02d".format(t.hour)).replace("%M", "%02d".format(t.minute))
+        }
+
+        /** Python's f"{x:.{d}f}": the exact binary value, ties to even, and "-0" for small negatives. */
+        fun fx(x: Double, d: Int = 0): String {
+            val s = BigDecimal(x).setScale(d, RoundingMode.HALF_EVEN).toPlainString()
+            return if (x < 0 && !s.startsWith("-")) "-$s" else s
+        }
+
+        fun compass(deg: Double): String = COMPASS[(((deg % 360) + 360) % 360 / 22.5 + 0.5).toInt() % 16]
+
         val PTYPE_FR = mapOf("None" to "Aucune", "Rain" to "Pluie", "Snow" to "Neige", "Freezing rain" to "Pluie verglaçante",
             "Ice pellets" to "Grésil", "Drizzle" to "Bruine", "Freezing drizzle" to "Bruine verglaçante",
             "Wet snow" to "Neige mouillée", "Rain/snow" to "Pluie et neige", "Snow grains" to "Neige en grains")

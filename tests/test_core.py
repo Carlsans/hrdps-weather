@@ -117,8 +117,10 @@ def test_fill_edges():
     assert hrdps._fill([None, None]) == [None, None]
 
 
-def test_next_run_countdown():
+def test_next_run_countdown(monkeypatch):
     from datetime import timedelta
+    # the default delay, not the lags this computer's own cache has observed
+    monkeypatch.setattr(hrdps, "run_lag", lambda: hrdps.DEFAULT_LAG)
     ref = datetime(2026, 10, 8, 6, tzinfo=timezone.utc)
     now = datetime(2026, 10, 8, 14, 0, tzinfo=timezone.utc)           # next cycle 12Z, available ≈ 15:10Z
     nxt, eta, left = hrdps.next_run(ref, now, lag=3 * 3600 + 600)

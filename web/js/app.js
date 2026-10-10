@@ -503,6 +503,10 @@ async function main() {
     if (window.HrdpsAndroid?.canPinWidget?.()) {
       $("pin-widget").hidden = false;
       $("pin-widget").addEventListener("click", () => window.HrdpsAndroid.pinWidget());
+      if (window.HrdpsAndroid.pinLargeWidget) {                     // app 1.6+
+        $("pin-widget-large").hidden = false;
+        $("pin-widget-large").addEventListener("click", () => window.HrdpsAndroid.pinLargeWidget());
+      }
     }
   } catch { /* not in the Android app */ }
   $("play").addEventListener("click", () => { if (app.view) { app.view.playing = !app.view.playing; app.dirty = true; } });

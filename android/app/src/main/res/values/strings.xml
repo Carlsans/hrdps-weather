@@ -2,5 +2,7 @@
 <resources>
     <string name="app_name">Météo HRDPS</string>
     <string name="widget_name">Météo HRDPS</string>
+    <string name="widget_large_name">Météo HRDPS — détaillé</string>
+    <string name="widget_large_description">Conditions, vent, alertes des 12 prochaines heures et prévisions heure par heure (HRDPS)</string>
     <string name="widget_description">Conditions actuelles et prochaines précipitations (HRDPS, Environnement Canada)</string>
 </resources>

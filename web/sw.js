@@ -2,7 +2,7 @@
 //   - the app files are cached per version; a new version waits until the page asks to switch (banner)
 //   - OpenStreetMap tiles are kept on disk (cache first, refreshed in the background after a week)
 //   - GeoMet requests are never intercepted: weather data always comes from the network (or IndexedDB)
-const VERSION = "1.5.0";
+const VERSION = "1.6.0";
 const BUILD = "dev";                  // replaced by the commit id when GitHub Pages deploys (pages.yml)
 const SHELL = `shell-${VERSION}-${BUILD}`;
 const TILES = "osm-tiles";

@@ -97,22 +97,24 @@ class MainActivity : ComponentActivity() {
             val p = Place.fromJson(json) ?: return
             if (Prefs.setPlace(applicationContext, p)) {
                 Prefs.setSnapshot(applicationContext, null)
-                WeatherWidget.render(applicationContext)
+                Widgets.render(applicationContext)
             }
-            WeatherWidget.refreshNow(applicationContext)
+            Widgets.refreshNow(applicationContext)
         }
 
         /** True when the launcher can add the widget from the app (Android 8+, most launchers). */
         @JavascriptInterface
         fun canPinWidget(): Boolean = AppWidgetManager.getInstance(this@MainActivity).isRequestPinAppWidgetSupported
 
-        /** Ask the launcher to add the widget (it shows its own confirmation). */
+        /** Ask the launcher to add a widget (it shows its own confirmation): the 3×2 one, or the 4×3 one. */
         @JavascriptInterface
-        fun pinWidget() {
-            runOnUiThread {
-                AppWidgetManager.getInstance(this@MainActivity)
-                    .requestPinAppWidget(ComponentName(this@MainActivity, WeatherWidget::class.java), null, null)
-            }
+        fun pinWidget() = pin(WeatherWidget::class.java)
+
+        @JavascriptInterface
+        fun pinLargeWidget() = pin(WeatherWidgetLarge::class.java)
+
+        private fun pin(provider: Class<*>) = runOnUiThread {
+            AppWidgetManager.getInstance(this@MainActivity).requestPinAppWidget(ComponentName(this@MainActivity, provider), null, null)
         }
     }
 
