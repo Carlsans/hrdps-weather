@@ -2,7 +2,8 @@
 
 Météo d'**Environnement et Changement climatique Canada** : prévisions du **HRDPS** (Système à haute résolution de
 prévision déterministe, 2,5 km, 48 h) et **radar météo** observé. Carte animée (précipitations, température, vent,
-nuages, radar) avec zoom et déplacement, graphiques synchronisés, alertes et détails heure par heure.
+nuages, radar, marées) avec zoom et déplacement, graphiques synchronisés, alertes, détails heure par heure, soleil et
+normales climatiques.
 
 - **Linux** : module [waybar](https://github.com/Alexays/Waybar) (et i3blocks, polybar, i3status-rust…) + fenêtre ; binaire prêt à l'emploi.
 - **Windows** : icône dans la zone de notification (température sur l'icône) + fenêtre complète au clic.
@@ -85,8 +86,10 @@ depuis un magasin d'applications, aucune permission à accorder : la position GP
 *Utiliser ma position* (sinon, entrez la latitude et la longitude).
 
 C'est la même application que la fenêtre de bureau, réécrite pour le navigateur (`web/`, sans dépendance) : carte
-animée avec les cinq couches et le radar (pincer pour zoomer, double-toucher, glisser), les cinq graphiques (toucher
-ou glisser horizontalement pour parcourir le temps), alertes, détails heure par heure. Les données sont gardées sur
+animée avec les couches HRDPS, le radar et l'onglet **Marées** (pincer pour zoomer, double-toucher, glisser), les cinq
+graphiques (toucher ou glisser horizontalement pour parcourir le temps), alertes, détails heure par heure, puis un
+bandeau **Soleil et normales climatiques** avec le lien vers la page officielle d'Environnement Canada. Un champ
+facultatif de la fenêtre *Position* permet de choisir la station de marées. Les données sont gardées sur
 l'appareil : l'application s'ouvre hors ligne sur le dernier run téléchargé. Elle cherche un nouveau run quand elle
 est ouverte (la première fois, ~1–2 minutes pour la série au point, puis ~1 minute pour les cartes) ; elle ne
 télécharge rien en arrière-plan une fois fermée. Les nouvelles versions s'installent d'elles-mêmes : un bandeau
@@ -248,7 +251,8 @@ cd android && EXPECTED=../expected.json ./gradlew testReleaseUnitTest assembleRe
 ```
 
 Les tests web comparent la couche de données JavaScript (`web/js/hrdps.js`) au Python sur le même run : séries
-dérivées, icônes, alertes, dates, textes ; ceux d'Android font de même pour la logique du widget
+dérivées, icônes, alertes, dates, textes, puis lever/coucher du soleil, normales, marées (`astro.js`, `climate.js`,
+`tides.js`) ; ceux d'Android font de même pour la logique du widget
 (`android/.../Forecast.kt`). Toute modification de `hrdps.py` doit être reportée dans `hrdps.js` et `Forecast.kt`.
 
 ## Attributions

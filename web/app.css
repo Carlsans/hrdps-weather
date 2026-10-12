@@ -75,6 +75,23 @@ main { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--gap); ma
 #d-grid dt { font-size: 11px; color: var(--muted); }
 #d-grid dd { margin: 0; font-size: 14.5px; font-weight: 650; overflow-wrap: anywhere; }
 
+#almanac {
+  background: var(--surface); border-radius: 10px; padding: 10px 12px 12px;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px 24px;
+}
+#almanac h3 { margin: 0 0 4px; font-size: 11px; letter-spacing: .04em; color: var(--blue); }
+#almanac p { font-size: 13.5px; color: var(--subtle); line-height: 1.5; }
+#almanac b { color: var(--text); font-weight: 650; }
+#almanac .sun b { color: var(--peach); }
+#almanac .warm { color: var(--peach); font-weight: 650; }
+#almanac .cold { color: #89dceb; font-weight: 650; }
+#almanac .link { display: flex; flex-direction: column; justify-content: center; gap: 6px; align-items: flex-start; }
+#almanac .link a {
+  display: inline-block; padding: 8px 14px; border: 1px solid #89b4fa99; border-radius: 8px; background: var(--panel);
+  color: var(--blue); font-weight: 650; font-size: 13px; text-decoration: none;
+}
+#almanac .link small { color: var(--muted); font-size: 10.5px; }
+
 #empty { text-align: center; color: var(--subtle); padding: 18vh 10px; }
 #empty .big { font-size: 64px; }
 body.nodata main { display: none; }
@@ -115,7 +132,7 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top
 }
 @media (min-width: 1100px) {
   main { grid-template-columns: 560px minmax(0, 1fr); }
-  #details { grid-column: 1 / -1; }
+  #details, #almanac { grid-column: 1 / -1; }
   #d-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
   #icon { font-size: 54px; }
   #temp { font-size: 62px; }

@@ -492,6 +492,27 @@ class View:
         credit = "© contributeurs OpenStreetMap · " + ("radar ECCC" if lay == "radar" else "données HRDPS © ECCC")
         text(cr, credit, x + 12, y + h - 15, 9, SUBTLE, False, "l", alpha=0.8)
 
+    # Symbols are drawn as paths: the text API of a bare pycairo build (Windows, the Linux binary) has no
+    # symbol-font fallback, so characters like ▲ ▼ ■ ↗ would show up as empty boxes there.
+    @staticmethod
+    def _shape(cr, kind, cx, cy, r, color):
+        cr.new_path()
+        if kind == "up":
+            cr.move_to(cx, cy - r); cr.line_to(cx + r, cy + r * 0.8); cr.line_to(cx - r, cy + r * 0.8)
+        elif kind == "down":
+            cr.move_to(cx, cy + r); cr.line_to(cx + r, cy - r * 0.8); cr.line_to(cx - r, cy - r * 0.8)
+        else:
+            cr.rectangle(cx - r * 0.8, cy - r * 0.8, r * 1.6, r * 1.6)
+        cr.close_path()
+        cr.set_source_rgb(*color); cr.fill()
+
+    @staticmethod
+    def _arrow_ne(cr, cx, cy, r, color):
+        """A small north-east arrow (external link)."""
+        cr.set_source_rgb(*color); cr.set_line_width(1.8); cr.set_line_cap(cairo.LINE_CAP_ROUND)
+        cr.move_to(cx - r, cy + r); cr.line_to(cx + r, cy - r); cr.stroke()
+        cr.move_to(cx - r * 0.2, cy - r); cr.line_to(cx + r, cy - r); cr.line_to(cx + r, cy + r * 0.2); cr.stroke()
+
     # tides -----------------------------------------------------------------------
     def _draw_tides(self, cr, x, y, w, h):
         tl = self.tides
@@ -526,11 +547,12 @@ class View:
             fw = text(cr, f"{ft(level)} pi", x + 16 + lw + 10, y + 78, 20, SUBTLE, True)
             rate = td.trend(now)
             col = SKY if (rate or 0) > 0.05 else PEACH if (rate or 0) < -0.05 else SUBTLE
-            arrow = "▲" if (rate or 0) > 0.05 else "▼" if (rate or 0) < -0.05 else "■"
+            shape = "up" if (rate or 0) > 0.05 else "down" if (rate or 0) < -0.05 else "flat"
             tx = x + 16 + lw + 10 + fw + 18
-            text(cr, f"{arrow} {tides.trend_text(rate)}", tx, y + 66, 15, col, True)
+            self._shape(cr, shape, tx + 6, y + 75, 6, col)
+            text(cr, tides.trend_text(rate), tx + 20, y + 66, 15, col, True)
             if rate is not None and abs(rate) >= 0.05:
-                text(cr, f"({ft(abs(rate))} pi/h)", tx, y + 86, 12, SUBTLE)
+                text(cr, f"({ft(abs(rate))} pi/h)", tx + 20, y + 86, 12, SUBTLE)
             sub = "mesuré" if obs else "prédit"
             if obs and pred is not None and abs(obs[1] - pred) >= 0.005:
                 diff = obs[1] - pred
@@ -621,7 +643,7 @@ class View:
             high = kind_ == "H"
             left = max(int((t - now) // 60), 0)
             day = "" if loc(t).date() == loc(now).date() else f" {hrdps.fr(loc(t), '%a')}"
-            text(cr, "▲" if high else "▼", ex, ey + 1, 14, SKY if high else PEACH, True)
+            self._shape(cr, "up" if high else "down", ex + 6, ey + 9, 6, SKY if high else PEACH)
             text(cr, f"{'Pleine mer' if high else 'Basse mer'}  {loc(t):%H:%M}{day}", ex + 20, ey, 13, TEXT, True)
             when = f"dans {left // 60} h {left % 60:02d}" if left >= 60 else f"dans {left} min"
             text(cr, f"{fm(v)} m ({ft(v)} pi) · {when}", ex + 20, ey + 16, 11, SUBTLE)
@@ -1131,7 +1153,11 @@ class View:
         url = links.forecast_url()
         cr.set_source_rgb(*PANEL); rrect(cr, bx, by, bw, 28, 8); cr.fill()
         cr.set_source_rgba(*BLUE, 0.7); cr.set_line_width(1); rrect(cr, bx + 0.5, by + 0.5, bw - 1, 27, 8); cr.stroke()
-        text(cr, "Prévisions Environnement Canada  ↗", bx + bw / 2, by + 14, 12, BLUE, True, "c", "m")
+        label = "Prévisions Environnement Canada"
+        tw = text(cr, label, 0, 0, 12, BLUE, True, alpha=0)                  # measure only
+        lx = bx + (bw - tw - 18) / 2
+        text(cr, label, lx, by + 14, 12, BLUE, True, "l", "m")
+        self._arrow_ne(cr, lx + tw + 9, by + 14, 5, BLUE)
         self.hits.append(((bx, by, bw, 28), "link", url))
         text(cr, "Source : Environnement et Changement climatique Canada", W - M - 16, y0 + 84, 9, MUTED, False, "r")
 

@@ -1,8 +1,11 @@
 // The page: configuration, cache, background refresh, rendering loop and input (port of ui_tk.py + tray.py).
 
+import * as astro from "./astro.js";
+import * as climate from "./climate.js";
 import * as config from "./config.js";
 import * as H from "./hrdps.js";
 import * as store from "./store.js";
+import * as tides from "./tides.js";
 import { TileCache } from "./tiles.js";
 import { VERSION } from "./version.js";
 import { Charts, LAYERS, MapView, compass } from "./view.js";
@@ -18,6 +21,8 @@ const app = {
   view: null,
   charts: new Charts(),
   tiles: new TileCache(),
+  normals: null,                         // climate.Loader (normals of the nearest station)
+  tides: null,                           // tides.Loader (the "Marées" tab)
   busy: false,
   dirty: true,
   lastDetails: "",
@@ -49,6 +54,7 @@ function setData(raw) {
     const c = navigator.connection;
     app.view.prefetchRadar = !(c && (c.saveData || /2g/.test(c.effectiveType || "")));
     if (app.maps) app.view.maps = app.maps;
+    app.view.tides = app.tides;
   } else app.view.setData(app.data);
   document.body.classList.remove("nodata");
   $("empty").hidden = true;
@@ -155,11 +161,98 @@ function updateHeader() {
   el.textContent = al.length ? al.slice(0, 4).map(([a]) => "⚠ " + a).join("   ") : "Aucune alerte dans les 36 prochaines heures";
   $("run").textContent = `HRDPS 2,5 km · run ${String(new Date(d.ref).getUTCHours()).padStart(2, "0")}Z (${H.fr(H.localParts(d.ref, d.tz), "%a %d %b %Hh")})`;
   updateNextRun();
+  updateAlmanac();
   document.title = `${H.fx(d.tt[i])}° · ${app.cfg.location} — Météo HRDPS`;
 }
 
 function updateNextRun() {
   if (app.data) $("next").textContent = H.nextRunText(app.data.ref, app.data.tz, Date.now(), H.runLag(app.state.lags));
+}
+
+// ── sun, normals and the official page (port of View.draw_almanac) ───────────
+let almanacKey = "";
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+/** A paragraph from [text, kind] pieces: kind "b" bold, "warm"/"cold" coloured, "" plain. */
+function para(parts, cls = "") {
+  const p = el("p", cls);
+  parts.forEach(([t, k], n) => {
+    const s = el(k === "b" ? "b" : "span", k && k !== "b" ? k : "", t);
+    p.append(s);
+    if (n < parts.length - 1) p.append(" ");
+  });
+  return p;
+}
+function updateAlmanac() {
+  const d = app.data, box = $("almanac");
+  if (!d || !app.cfg) { box.replaceChildren(); almanacKey = ""; return; }
+  const nm = app.normals ? app.normals.normals : null, nowI = d.nowIndex();
+  const key = `${d.raw.ref}/${nowI}/${nm ? "n" : app.normals ? app.normals.state : "-"}/${app.cfg.latitude},${app.cfg.longitude}`;
+  if (key === almanacKey) return;
+  almanacKey = key;
+  const tz = d.tz, today = d.local[nowI];
+  const prev = new Date(Date.UTC(today.year, today.month - 1, today.day - 1));
+  const sun = astro.sunTimes(today.year, today.month, today.day, app.cfg.latitude, app.cfg.longitude, tz);
+  const before = astro.sunTimes(prev.getUTCFullYear(), prev.getUTCMonth() + 1, prev.getUTCDate(), app.cfg.latitude, app.cfg.longitude, tz);
+  const hm = (ms) => (ms === null ? "—" : H.fr(H.localParts(ms, tz), "%H:%M"));
+  const cols = [];
+
+  const s = el("div", "sun");
+  s.append(el("h3", "", "SOLEIL"), para([["Lever", ""], [hm(sun.sunrise), "b"]]), para([["Coucher", ""], [hm(sun.sunset), "b"]]),
+    para([["Durée", ""], [astro.fmtDuration(sun.length), "b"], [`(${astro.signed((sun.length - before.length) / 60, " min")} vs hier)`, ""]]));
+  cols.push(s);
+
+  const n = el("div");
+  if (!nm) {
+    const st = app.normals ? app.normals.state : "";
+    n.append(el("h3", "", st === "missing" ? "Normales climatiques indisponibles (réseau ?)" : "Normales climatiques : chargement…"));
+  } else {
+    const st = nm.station("tmean");
+    n.append(el("h3", "", `NORMALES ${nm.period}` + (st ? ` — ${climate.prettyStation(st.name)} (${Math.round(st.km)} km)` : "")));
+    const nd = ["tmean", "tmax", "tmin"].every((k) => nm.has(k));
+    n.append(para(nd ? [[`Normale du jour (${today.day} ${climate.MONTHS[today.month - 1]})`, ""],
+      [`max ${H.fx(nm.daily("tmax", today))}°`, "b"], [`min ${H.fx(nm.daily("tmin", today))}°`, "b"], [`moy. ${H.fx(nm.daily("tmean", today))}°`, "b"]] : [["—", ""]]));
+    [["Aujourd'hui", 0], ["Demain", 1]].forEach(([lab, off]) => {
+      const dt = new Date(Date.UTC(today.year, today.month - 1, today.day + off));
+      const day = { year: dt.getUTCFullYear(), month: dt.getUTCMonth() + 1, day: dt.getUTCDate() };
+      const idx = [];
+      d.local.forEach((p, i) => { if (p.year === day.year && p.month === day.month && p.day === day.day && d.tt[i] !== null) idx.push(i); });
+      if (!idx.length || !nd) return;
+      const hi = Math.max(...idx.map((i) => d.tt[i])), lo = Math.min(...idx.map((i) => d.tt[i]));
+      const dh = hi - nm.daily("tmax", day), dl = lo - nm.daily("tmin", day);
+      const kind = (v) => (v > 0.5 ? "warm" : v < -0.5 ? "cold" : "");
+      n.append(para([[`${lab} prévu${idx.length >= 20 ? "" : " (partiel)"}`, ""], [`max ${H.fx(hi)}°`, "b"], [astro.signed(dh), kind(dh)],
+        ["min", ""], [`${H.fx(lo)}°`, "b"], [astro.signed(dl), kind(dl)], ["vs normale", ""]]));
+    });
+    const m = today.month, bits = [];
+    if (nm.has("precip")) {
+      bits.push(["Mois :", ""], [`${H.fx(nm.month("precip", m))} mm`, "b"]);
+      if (nm.has("pdays")) bits.push([`(${H.fx(nm.month("pdays", m))} j)`, ""]);
+    }
+    if (nm.has("snow") && nm.month("snow", m) >= 0.5) bits.push(["neige", ""], [`${H.fx(nm.month("snow", m))} cm`, "b"]);
+    if (nm.has("sun")) bits.push(["soleil", ""], [`${H.fx(nm.month("sun", m))} h`, "b"]);
+    if (nm.has("wind")) bits.push(["vent", ""], [`${H.fx(nm.month("wind", m))} km/h`, "b"]);
+    n.append(para(bits.length ? bits : [["—", ""]]));
+  }
+  cols.push(n);
+
+  const link = el("div", "link"), a = el("a", "", "Prévisions Environnement Canada ↗");
+  a.href = `https://meteo.gc.ca/fr/location/index.html?coords=${app.cfg.latitude.toFixed(3)},${app.cfg.longitude.toFixed(3)}`;
+  a.target = "_blank"; a.rel = "noopener";
+  link.append(a, el("small", "", "Source : Environnement et Changement climatique Canada"));
+  cols.push(link);
+  box.replaceChildren(...cols);
+}
+
+function startLoaders() {
+  app.normals = new climate.Loader(app.cfg);
+  app.tides = new tides.Loader(app.cfg);
+  if (app.view) app.view.tides = app.tides;
+  almanacKey = "";
 }
 
 function updateDetails() {
@@ -223,13 +316,14 @@ function resize() {
   app.dirty = true;
 }
 
-let last = performance.now(), lastDraw = 0;
+let last = performance.now(), lastDraw = 0, normalsSeen = -1;
 function loop(now) {
   requestAnimationFrame(loop);
   const dt = Math.min((now - last) / 1000, 0.25);
   last = now;
   const v = app.view;
   if (!v || document.hidden) return;
+  if (app.normals && app.normals.version !== normalsSeen) { normalsSeen = app.normals.version; updateAlmanac(); }
   v.tick(dt);
   if (!(v.playing || v.poll() || app.dirty) || now - lastDraw < FRAME_MS) return;
   lastDraw = now;
@@ -291,7 +385,7 @@ function mapInput() {
     if (tag === "zoom_in") v.zoomBy(+0.5);
     else if (tag === "zoom_out") v.zoomBy(-0.5);
     else if (tag === "zoom_reset") v.reset();
-    else {
+    else if (tag === "map") {
       v.beginPan();
       el._press = [x, y];
     }
@@ -398,7 +492,7 @@ function keyboard() {
       v.t = Math.min(Math.max(Math.round(v.t) + (k === "ArrowRight" ? 1 : -1), v.i0), v.i1);
     } else if (k === "ArrowUp" || k === "ArrowDown") v.speed = Math.min(Math.max(v.speed * (k === "ArrowUp" ? 2 : 0.5), 1), 8);
     else if (k === "Home") v.t = v.i0;
-    else if ("12345".includes(k) && k.length === 1) setLayer(LAYERS[+k - 1][0]);
+    else if ("123456".includes(k) && k.length === 1) setLayer(LAYERS[+k - 1][0]);
     else if (k === "+" || k === "=") v.zoomBy(+0.5);
     else if (k === "-") v.zoomBy(-0.5);
     else if (k === "0") v.reset();
@@ -417,6 +511,7 @@ function tellAndroid() {
 function openSettings(first = false) {
   const dlg = $("settings"), f = $("settings-form"), c = app.cfg || { ...config.DEFAULTS, timezone: config.deviceTimezone() };
   f.location.value = c.location; f.latitude.value = c.latitude; f.longitude.value = c.longitude; f.timezone.value = c.timezone;
+  f.tide_station.value = c.tide_station || "";
   $("settings-error").textContent = "";
   $("settings-cancel").hidden = first;
   $("settings-intro").hidden = !first;
@@ -443,7 +538,8 @@ function settingsDialog() {
   f.addEventListener("submit", async (e) => {
     e.preventDefault();
     const num = (s) => Number(String(s).trim().replace(",", "."));
-    const c = { location: f.location.value.trim(), latitude: num(f.latitude.value), longitude: num(f.longitude.value), timezone: f.timezone.value.trim() };
+    const c = { location: f.location.value.trim(), latitude: num(f.latitude.value), longitude: num(f.longitude.value), timezone: f.timezone.value.trim(),
+      tide_station: f.tide_station.value.trim() };
     const msg = config.check(c);
     if (msg) { err.textContent = msg; return; }
     const before = app.cfg;
@@ -452,16 +548,22 @@ function settingsDialog() {
     dlg.close();
     if (!before) return;                                    // first launch: main() carries on
     if (!config.samePlace(before, app.cfg) || before.timezone !== app.cfg.timezone) await changePlace();
-    else { if (app.view) { app.view.place = app.cfg; } updateHeader(); app.dirty = true; }
+    else {
+      if (app.view) { app.view.place = app.cfg; }
+      if ((before.tide_station || "") !== (app.cfg.tide_station || "")) startLoaders();       // another tide station
+      updateHeader(); app.dirty = true;
+    }
   });
 }
 
 async function changePlace() {
   app.data = null; app.maps = null; app.view = null; app.lastDetails = ""; app.charts = new Charts();
+  startLoaders();
   document.body.classList.add("nodata");
   $("empty").hidden = false;
   $("empty-text").textContent = "Téléchargement des données HRDPS… (~1 à 2 minutes la première fois)";
   for (const id of ["icon", "sub", "alerts", "run", "next"]) $(id).textContent = "";
+  $("almanac").replaceChildren();
   $("temp").textContent = "–"; $("describe").textContent = "Météo HRDPS";
   await loadCache();
   updateHeader();
@@ -533,6 +635,7 @@ async function main() {
     $("empty-text").textContent = "Téléchargement des données HRDPS… (~1 à 2 minutes la première fois)";
   }
   tellAndroid();
+  startLoaders();
   await loadCache();
   updateHeader();
   syncLayerButtons();

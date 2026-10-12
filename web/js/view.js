@@ -4,6 +4,7 @@
 
 import { fr, fx, fg, localParts } from "./hrdps.js";
 import { RadarLoader, R, SNOW_BELOW_C } from "./radar.js";
+import { FEET_PER_M, MAX_KM, trendText } from "./tides.js";
 
 // ── Theme (Catppuccin mocha) ─────────────────────────────────────────────────
 const hx = (c) => [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16));
@@ -14,10 +15,11 @@ export const TEAL = hx("#94e2d5"), SKY = hx("#89dceb"), BLUE = hx("#89b4fa"), LA
 const SNOWC = hx("#e6e9ff");
 const rgba = (c, a = 1) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
 
-export const LAYERS = [["rt", "💧", "Précip."], ["tt", "🌡️", "Temp."], ["ws", "💨", "Vent"], ["nt", "☁️", "Nuages"], ["radar", "📡", "Radar"]];
+export const LAYERS = [["rt", "💧", "Précip."], ["tt", "🌡️", "Temp."], ["ws", "💨", "Vent"], ["nt", "☁️", "Nuages"], ["radar", "📡", "Radar"],
+  ["tides", "🌊", "Marées"]];
 const LAYER_TITLE = { rt: "Précipitations (prévision HRDPS)", tt: "Température à 2 m (HRDPS)", ws: "Vent à 10 m (HRDPS)",
-  nt: "Couverture nuageuse (HRDPS)", radar: "Radar météo (observé, ECCC)" };
-const LAYER_SHORT = { rt: "Précipitations", tt: "Température à 2 m", ws: "Vent à 10 m", nt: "Nuages", radar: "Radar (observé)" };
+  nt: "Couverture nuageuse (HRDPS)", radar: "Radar météo (observé, ECCC)", tides: "Marées (Service hydrographique du Canada)" };
+const LAYER_SHORT = { rt: "Précipitations", tt: "Température à 2 m", ws: "Vent à 10 m", nt: "Nuages", radar: "Radar (observé)", tides: "Marées (SHC)" };
 // Camera zoom: 7.55 showed the 3-tile block in the desktop's 560-px map; other widths keep the same span.
 const DESIGN_MAP = 560, DESIGN_Z = 7.55, MIN_Z = 5.5, MAX_Z = 11.0;
 const OV = 160;                   // model overlay raster size (square), scaled up with bilinear filtering
@@ -118,6 +120,7 @@ export class MapView {
     this.layer = "rt"; this.playing = true; this.speed = 2.0;      // speed: model hours per second
     this.maps = null;
     this.radar = null;
+    this.tides = null;                                              // tides.Loader: the "Marées" tab
     this.rt = 0;                                                    // radar frame cursor (float index)
     this.prefetchRadar = false;
     this.w = DESIGN_MAP; this.h = DESIGN_MAP;
@@ -168,7 +171,7 @@ export class MapView {
 
   /** True when something that arrived in the background (tiles, radar) should trigger a redraw. */
   poll() {
-    const seen = `${this.tiles ? this.tiles.version : -1}/${this.radar ? this.radar.version : -1}`;
+    const seen = `${this.tiles ? this.tiles.version : -1}/${this.radar ? this.radar.version : -1}/${this.tides ? this.tides.version : -1}`;
     const changed = seen !== this._seen;
     this._seen = seen;
     return changed;
@@ -261,6 +264,19 @@ export class MapView {
   // -- drawing -----------------------------------------------------------------
   draw(ctx) {
     const { w, h } = this, narrow = w < 480;
+    if (this.layer === "tides") {                                   // a panel instead of a map
+      this.hits = [];
+      ctx.save();
+      rrect(ctx, 0, 0, w, h, 12); ctx.clip();
+      ctx.fillStyle = rgba(PANEL); ctx.fillRect(0, 0, w, h);
+      this._drawTides(ctx);
+      ctx.restore();
+      ctx.save(); rrect(ctx, 0, 0, w, 30, 12); ctx.clip();
+      ctx.fillStyle = rgba(SURFACE, 0.9); ctx.fillRect(0, 0, w, 30); ctx.restore();
+      text(ctx, narrow ? LAYER_SHORT.tides : LAYER_TITLE.tides, 12, 15, narrow ? 13 : 14, TEXT, true, "l", "m");
+      text(ctx, this.timeLabel(), w - 12, 15, narrow ? 13 : 14, SUBTLE, true, "r", "m");
+      return;
+    }
     this.hits = [[[0, 0, w, h], "map", null]];
     ctx.save();
     rrect(ctx, 0, 0, w, h, 12); ctx.clip();
@@ -283,6 +299,143 @@ export class MapView {
     this._drawLegend(ctx, 12, h - 32, w - 24);
     const credit = "© contributeurs OpenStreetMap · " + (lay === "radar" ? "radar ECCC" : "données HRDPS © ECCC");
     text(ctx, credit, 12, h - 15, 9, SUBTLE, false, "l", "t", 0.8);
+  }
+
+  // -- tides --------------------------------------------------------------------
+  _drawTides(ctx) {
+    const { w, h } = this, tl = this.tides, narrow = h < 450 || w < 420;
+    const msg = (s) => text(ctx, s, w / 2, h / 2, 15, SUBTLE, false, "c", "m");
+    if (!tl) return msg("Marées non chargées");
+    tl.ensure();
+    const td = tl.data;
+    if (!td) {
+      return msg(tl.state === "none" ? `Aucune station de marées à moins de ${MAX_KM} km de ${this.place.location}.`
+        : tl.state === "error" ? "Marées indisponibles (réseau ?)" : "Chargement des marées…");
+    }
+    const tz = this.d.tz;
+    const fm = (v, n = 2) => fx(v, n).replace(".", ","), ft = (v, n = 1) => fx(v * FEET_PER_M, n).replace(".", ",");
+    const loc = (s) => localParts(s * 1000, tz), hm = (s) => fr(loc(s), "%H:%M");
+    const now = Date.now() / 1000;
+    const i = Math.min(Math.floor(this.t), this.i1), j = Math.min(i + 1, this.i1);
+    const cursor = (this.d.utc[i] + (this.t - i) * (this.d.utc[j] - this.d.utc[i])) / 1000;
+    const st = td.station, px = narrow ? 12 : 16;
+    const kind = { PERMANENT: "station permanente", VIRTUAL: "station virtuelle", TEMPORARY: "station temporaire",
+      DISCONTINUED: "station fermée" }[st.type] || "station";
+    text(ctx, `${st.name} · ${kind} · ${Math.round(st.km)} km`, px, narrow ? 40 : 42, narrow ? 11 : 12, SUBTLE);
+
+    // current level (metres and feet), trend, difference with the prediction, water temperature
+    const obs = td.latestObserved(now), pred = td.predicted(now), level = obs ? obs[1] : pred;
+    if (level !== null) {
+      const ly = narrow ? 56 : 60;
+      const lw = text(ctx, `${fm(level)} m`, px, ly, narrow ? 32 : 40, TEXT, true);
+      const fw = text(ctx, `${ft(level)} pi`, px + lw + 10, ly + (narrow ? 14 : 18), narrow ? 16 : 20, SUBTLE, true);
+      const rate = td.trend(now), up = (rate || 0) > 0.05, down = (rate || 0) < -0.05;
+      const tx = px + lw + 10 + fw + 14;
+      text(ctx, `${up ? "▲" : down ? "▼" : "■"} ${trendText(rate)}`, tx, ly + (narrow ? 4 : 6), narrow ? 13 : 15, up ? SKY : down ? PEACH : SUBTLE, true);
+      if (rate !== null && Math.abs(rate) >= 0.05) text(ctx, `(${ft(Math.abs(rate))} pi/h)`, tx, ly + (narrow ? 22 : 26), narrow ? 11 : 12, SUBTLE);
+      let sub = obs ? "mesuré" : "prédit";
+      if (obs && pred !== null && Math.abs(obs[1] - pred) >= 0.005) sub += ` · écart vs prédit ${fm(obs[1] - pred)} m (${ft(obs[1] - pred)} pi)`.replace("-", "−");
+      const temp = td.waterTemperature(now);
+      if (temp !== null) sub += ` · eau ${fm(temp, 1)} °C`;
+      text(ctx, sub, px, narrow ? 94 : 112, narrow ? 11 : 12, SUBTLE);
+    }
+    if (Math.abs(cursor - now) > 20 * 60) {                         // the time cursor is elsewhere
+      const at = td.predicted(cursor);
+      if (at !== null) text(ctx, `${fr(loc(cursor), "%a %Hh")} : ${fm(at)} m (${ft(at)} pi)`, w - px, narrow ? 40 : 42, narrow ? 12 : 13, YELLOW, true, "r");
+    }
+
+    // chart
+    const cx0 = narrow ? 32 : 46, cx1 = w - px, cy0 = narrow ? 114 : 140;
+    const rowsTop = h - (narrow ? 100 : 166);
+    const ch = Math.max(90, rowsTop - cy0 - (narrow ? 36 : 48));
+    const t0 = now - 12 * 3600, t1 = Math.max(this.d.utc[this.i1] / 1000, now + 24 * 3600);
+    const X = (t) => cx0 + (t - t0) / (t1 - t0) * (cx1 - cx0);
+    const vals = [];
+    for (const s of [td.wlp, td.wlo, td.wlf]) for (const [t, v] of s) if (t >= t0 && t <= t1) vals.push(v);
+    if (!vals.length) return msg("Pas de prédictions pour cette période");
+    // room for the two-line labels of highs (above) and lows (below), in pixels so that it fits any chart height
+    const lo = Math.min(...vals), hi = Math.max(...vals), padTop = 36, padBottom = 32;
+    const perM = Math.max(ch - padTop - padBottom, 40) / Math.max(hi - lo, 0.5);
+    const vmin = lo - padBottom / perM, vmax = hi + padTop / perM;
+    const Y = (v) => cy0 + ch - (v - vmin) / (vmax - vmin) * ch;
+    rrect(ctx, cx0, cy0, cx1 - cx0, ch, 8); fill(ctx, SURFACE);
+    ctx.save(); rrect(ctx, cx0, cy0, cx1 - cx0, ch, 8); ctx.clip();
+    const step = vmax - vmin <= 8 ? 1 : 2, gLo = Math.ceil(vmin / step), gHi = Math.floor(vmax / step);
+    ctx.lineWidth = 0.7; ctx.strokeStyle = rgba(MUTED, 0.25);
+    for (let g = gLo; g <= gHi; g++) { ctx.beginPath(); ctx.moveTo(cx0, Y(g * step)); ctx.lineTo(cx1, Y(g * step)); ctx.stroke(); }
+    const firstHour = Math.floor(t0 / 3600) * 3600, sixHourMarks = [];
+    for (let s = firstHour; s <= t1; s += 3600) {
+      const lt = loc(s);
+      if (lt.hour % 6 === 0 && lt.minute === 0 && s >= t0) sixHourMarks.push([s, lt]);
+    }
+    for (const [s, lt] of sixHourMarks) {
+      ctx.lineWidth = 0.8; ctx.strokeStyle = rgba(MUTED, lt.hour === 0 ? 0.6 : 0.25);
+      ctx.setLineDash(lt.hour === 0 ? [3, 3] : []);
+      ctx.beginPath(); ctx.moveTo(X(s), cy0); ctx.lineTo(X(s), cy0 + ch); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    const line = (series, color, width, dash, since, until, shade) => {
+      const pts = series.filter(([t]) => t >= t0 && t <= t1 && (since === null || t >= since) && (until === null || t <= until)).map(([t, v]) => [X(t), Y(v)]);
+      if (pts.length < 2) return;
+      if (shade) {
+        ctx.beginPath(); ctx.moveTo(pts[0][0], cy0 + ch);
+        for (const p of pts) ctx.lineTo(p[0], p[1]);
+        ctx.lineTo(pts.at(-1)[0], cy0 + ch); ctx.closePath(); fill(ctx, color, 0.16);
+      }
+      ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
+      for (const p of pts.slice(1)) ctx.lineTo(p[0], p[1]);
+      ctx.strokeStyle = rgba(color); ctx.lineWidth = width; ctx.lineJoin = "round"; ctx.setLineDash(dash || []); ctx.stroke(); ctx.setLineDash([]);
+    };
+    line(td.wlp, BLUE, 2.2, null, null, null, true);
+    line(td.wlf, LAV, 1.6, [5, 4], now - 1800, null, false);
+    line(td.wlo, GREEN, 2.2, null, null, now, false);
+    ctx.restore();
+    const lab = narrow ? 9 : 10;
+    for (const [t, v, k] of td.events) {                            // highs and lows
+      if (t < t0 || t > t1) continue;
+      const high = k === "H";
+      ctx.beginPath(); ctx.arc(X(t), Y(v), 4.5, 0, 2 * Math.PI); fill(ctx, BG);
+      ctx.beginPath(); ctx.arc(X(t), Y(v), 3.2, 0, 2 * Math.PI); fill(ctx, high ? SKY : PEACH);
+      text(ctx, `${fm(v, 1)} m · ${ft(v)} pi`, X(t), Y(v) + (high ? -30 : 7), lab, TEXT, true, "c");
+      text(ctx, hm(t), X(t), Y(v) + (high ? -17 : 19), lab, SUBTLE, false, "c");
+    }
+    for (let g = gLo; g <= gHi; g++) text(ctx, `${g * step}`, cx0 - 6, Y(g * step), 10, MUTED, false, "r", "m");
+    for (const [s, lt] of sixHourMarks) {
+      text(ctx, `${String(lt.hour).padStart(2, "0")}h`, X(s), cy0 + ch + 4, 10, MUTED, false, "c");
+      if (lt.hour === 0) text(ctx, fr(lt, "%a %d"), X(s) + 3, cy0 + ch + 17, 10, SUBTLE, true);
+    }
+    text(ctx, "m", cx0 - 6, cy0 - 14, 10, MUTED, false, "r");
+    ctx.setLineDash([4, 3]); ctx.lineWidth = 1; ctx.strokeStyle = rgba(TEXT, 0.55);
+    ctx.beginPath(); ctx.moveTo(X(now), cy0); ctx.lineTo(X(now), cy0 + ch); ctx.stroke(); ctx.setLineDash([]);
+    if (cursor >= t0 && cursor <= t1) {
+      ctx.lineWidth = 1.4; ctx.strokeStyle = rgba(YELLOW, 0.9);
+      ctx.beginPath(); ctx.moveTo(X(cursor), cy0); ctx.lineTo(X(cursor), cy0 + ch); ctx.stroke();
+    }
+
+    // next highs and lows
+    const nxt = td.nextEvents(now, narrow ? 4 : 6), colW = (w - 2 * px) / 2;
+    if (!narrow) text(ctx, "PROCHAINES MARÉES", px, rowsTop, 11, BLUE, true);
+    nxt.forEach(([t, v, k], n) => {
+      const ex = px + (n % 2) * colW, ey = rowsTop + (narrow ? 4 : 20) + Math.floor(n / 2) * (narrow ? 32 : 34), high = k === "H";
+      const left = Math.max(Math.floor((t - now) / 60), 0);
+      const day = loc(t).day === loc(now).day && loc(t).month === loc(now).month ? "" : ` ${fr(loc(t), "%a")}`;
+      const when = left >= 60 ? `dans ${Math.floor(left / 60)} h ${String(left % 60).padStart(2, "0")}` : `dans ${left} min`;
+      text(ctx, high ? "▲" : "▼", ex, ey + 1, narrow ? 12 : 14, high ? SKY : PEACH, true);
+      text(ctx, `${high ? "Pleine mer" : "Basse mer"}  ${hm(t)}${day}`, ex + (narrow ? 16 : 20), ey, narrow ? 12 : 13, TEXT, true);
+      text(ctx, narrow ? `${fm(v)} m (${ft(v)} pi) · ${when}` : `${fm(v)} m (${ft(v)} pi) · ${when}`, ex + (narrow ? 16 : 20), ey + (narrow ? 14 : 16), narrow ? 10 : 11, SUBTLE);
+    });
+    if (!nxt.length) text(ctx, "Aucune marée prédite pour la suite", px, rowsTop + 4, 12, SUBTLE);
+
+    // legend + source
+    const ly = h - (narrow ? 30 : 30);
+    [["prédit", BLUE, null], ["observé", GREEN, null], [narrow ? "prévu" : "prévu (avec surcote)", LAV, [5, 4]]].forEach(([l, col, dash], k) => {
+      const lx = px + k * (narrow ? 72 : 90);
+      ctx.strokeStyle = rgba(col); ctx.lineWidth = 2; ctx.setLineDash(dash || []);
+      ctx.beginPath(); ctx.moveTo(lx, ly + 7); ctx.lineTo(lx + 16, ly + 7); ctx.stroke(); ctx.setLineDash([]);
+      text(ctx, l, lx + 21, ly, 10, SUBTLE);
+    });
+    text(ctx, narrow ? "Hauteurs en m · Service hydrographique du Canada" : "Hauteurs en m (zéro des cartes) · Service hydrographique du Canada, Pêches et Océans Canada",
+      px, h - 14, 9, MUTED);
   }
 
   _drawTiles(ctx) {

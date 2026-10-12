@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Météo HRDPS</title>
-  <meta name="description" content="Prévisions HRDPS (2,5 km, 48 h) et radar météo d'Environnement Canada : carte animée, graphiques, alertes.">
+  <meta name="description" content="Prévisions HRDPS (2,5 km, 48 h), radar, marées et normales climatiques d'Environnement Canada : carte animée, graphiques, alertes.">
   <meta name="theme-color" content="#1e1e2e">
   <meta name="color-scheme" content="dark">
   <link rel="manifest" href="manifest.webmanifest">
@@ -54,6 +54,7 @@
       <div class="details-head"><h2 id="d-when"></h2><span id="d-off" class="muted"></span></div>
       <dl id="d-grid"></dl>
     </section>
+    <section id="almanac" aria-label="Soleil, normales climatiques et page officielle"></section>
   </main>
 
   <div id="empty" hidden>
@@ -67,7 +68,7 @@
     <button id="pin-widget-large" type="button" class="chip" hidden>➕ Grand widget (4×3)</button>
     <span class="muted small">hrdps-weather <span id="version"></span> ·
       <a href="https://github.com/Carlsans/hrdps-weather" target="_blank" rel="noopener">code source</a> ·
-      données © ECCC · carte © contributeurs OpenStreetMap</span>
+      données © ECCC · marées © Service hydrographique du Canada · carte © contributeurs OpenStreetMap</span>
   </footer>
 
   <button id="banner" type="button" hidden>Nouvelle version disponible — toucher pour recharger</button>
@@ -84,6 +85,7 @@
         <label>Longitude <input name="longitude" inputmode="decimal" required></label>
       </div>
       <label>Fuseau horaire <input name="timezone" autocomplete="off" required></label>
+      <label>Station de marées (code, facultatif) <input name="tide_station" autocomplete="off" inputmode="numeric" placeholder="automatique : la plus proche"></label>
       <p id="settings-error" class="error" role="alert"></p>
       <div class="actions">
         <button type="button" id="settings-cancel" class="chip">Annuler</button>

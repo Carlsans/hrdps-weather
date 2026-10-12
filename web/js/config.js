@@ -60,6 +60,8 @@ export function save(cfg) {
     latitude: Number(cfg.latitude), longitude: Number(cfg.longitude),
     location: String(cfg.location || "").trim() || "Ma position", timezone: cfg.timezone,
   };
+  const station = String(cfg.tide_station || "").trim();                    // optional: code of a tide station
+  if (station) clean.tide_station = station;
   localStorage.setItem(KEY, JSON.stringify(clean));
   return clean;
 }
