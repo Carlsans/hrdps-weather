@@ -207,3 +207,26 @@ def test_tab_draws_with_data_and_cursor_elsewhere(data, td):
     from cairo import ImageSurface, Context, FORMAT_ARGB32
     v.draw(Context(ImageSurface(FORMAT_ARGB32, view.W, view.H)), view.W, view.H)
     assert getattr(v, "errors", 0) == 0
+
+
+def test_feet_conversion_is_exact():
+    assert view.FEET_PER_M == pytest.approx(1 / 0.3048, rel=1e-8)
+    assert round(2.57 * view.FEET_PER_M, 1) == 8.4 and round(5.29 * view.FEET_PER_M, 1) == 17.4
+
+
+def test_tab_shows_feet_next_to_metres(data, monkeypatch):
+    seen = []
+    real = view.text
+    monkeypatch.setattr(view, "text", lambda cr, s, *a, **k: (seen.append(str(s)), real(cr, s, *a, **k))[1])
+    now = time.time()
+    d = tides.TideData({"station": dict(station("B", "Permanente", 46.8, -71.2), km=6.6), "fetched": now,
+                        "wlp": sine_tide(now - 24 * 3600, 96), "wlo": [(now - 300, 2.57)],
+                        "hilo": [(now + 3 * 3600, 5.29), (now + 9 * 3600, 0.36)], "wt": [(now - 60, 12.4)]})
+    loader = tides.Loader(network=False)
+    loader.data = d
+    v = draw(data, loader)
+    assert getattr(v, "errors", 0) == 0
+    joined = " | ".join(seen)
+    assert "2,57 m" in seen and "8,4 pi" in seen                                # big level, feet beside it
+    assert "5,3 m · 17,4 pi" in joined and "5,29 m (17,4 pi)" in joined         # chart label and the list
+    assert "0,36 m (1,2 pi)" in joined

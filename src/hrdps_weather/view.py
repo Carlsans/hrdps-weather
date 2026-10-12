@@ -49,6 +49,7 @@ LAYERS = [("rt", "💧 Précip."), ("tt", "🌡 Temp."), ("ws", "💨 Vent"), ("
 LAYER_TITLE = {"rt": "Précipitations (prévision HRDPS)", "tt": "Température à 2 m (HRDPS)", "ws": "Vent à 10 m (HRDPS)",
                "nt": "Couverture nuageuse (HRDPS)", "radar": "Radar météo (observé, ECCC)",
                "tides": "Marées (Service hydrographique du Canada)"}
+FEET_PER_M = 3.280839895
 DEFAULT_Z, MIN_Z, MAX_Z = 7.55, 5.5, 11.0        # tile-zoom of the camera (7.55 ≈ the 3-tile block of earlier versions)
 OV = 160                                         # model overlay raster size (square), scaled up with bilinear filtering
 # Official radar palette (GeoMet legend, 0.1 → 200 mm/h), evenly spaced on the legend.
@@ -507,6 +508,7 @@ class View:
         tz = hrdps.TZ
         loc = lambda t: datetime.fromtimestamp(t, tz)
         fm = lambda v, n=2: f"{v:.{n}f}".replace(".", ",")
+        ft = lambda v, n=1: f"{v * FEET_PER_M:.{n}f}".replace(".", ",")          # metres -> feet ("pi")
         now = time.time()
         i = min(int(math.floor(self.t)), self.i1)
         j = min(i + 1, self.i1)
@@ -516,29 +518,34 @@ class View:
                 "DISCONTINUED": "station fermée"}.get(st.get("type", ""), "station")
         text(cr, f"{st['name']} · {kind} · {st['km']:.0f} km", x + 16, y + 42, 12, SUBTLE)
 
-        # current level, trend, difference with the prediction, water temperature
+        # current level (metres and feet), trend, difference with the prediction, water temperature
         obs, pred = td.latest_observed(now), td.predicted(now)
         level = obs[1] if obs else pred
         if level is not None:
-            lw = text(cr, f"{fm(level)} m", x + 16, y + 62, 40, TEXT, True)
+            lw = text(cr, f"{fm(level)} m", x + 16, y + 60, 40, TEXT, True)
+            fw = text(cr, f"{ft(level)} pi", x + 16 + lw + 10, y + 78, 20, SUBTLE, True)
             rate = td.trend(now)
             col = SKY if (rate or 0) > 0.05 else PEACH if (rate or 0) < -0.05 else SUBTLE
             arrow = "▲" if (rate or 0) > 0.05 else "▼" if (rate or 0) < -0.05 else "■"
-            text(cr, f"{arrow} {tides.trend_text(rate)}", x + 16 + lw + 14, y + 66, 15, col, True)
+            tx = x + 16 + lw + 10 + fw + 18
+            text(cr, f"{arrow} {tides.trend_text(rate)}", tx, y + 66, 15, col, True)
+            if rate is not None and abs(rate) >= 0.05:
+                text(cr, f"({ft(abs(rate))} pi/h)", tx, y + 86, 12, SUBTLE)
             sub = "mesuré" if obs else "prédit"
-            if obs and pred is not None:
-                sub += f" · écart vs prédit {fm(obs[1] - pred)} m".replace("-", "−") if abs(obs[1] - pred) >= 0.005 else ""
+            if obs and pred is not None and abs(obs[1] - pred) >= 0.005:
+                diff = obs[1] - pred
+                sub += f" · écart vs prédit {fm(diff)} m ({ft(diff)} pi)".replace("-", "−")
             temp = td.water_temperature(now)
             if temp is not None:
                 sub += f" · eau {fm(temp, 1)} °C"
-            text(cr, sub, x + 16 + lw + 14, y + 90, 12, SUBTLE)
+            text(cr, sub, x + 16, y + 112, 12, SUBTLE)
         if abs(cursor - now) > 20 * 60:                                   # the time cursor is elsewhere
             at = td.predicted(cursor)
             if at is not None:
-                text(cr, f"{hrdps.fr(loc(cursor), '%a %Hh')} : {fm(at)} m", x + w - 16, y + 42, 13, YELLOW, True, "r")
+                text(cr, f"{hrdps.fr(loc(cursor), '%a %Hh')} : {fm(at)} m ({ft(at)} pi)", x + w - 16, y + 42, 13, YELLOW, True, "r")
 
         # chart
-        cx0, cx1, cy0, ch = x + 46, x + w - 16, y + 150, 214
+        cx0, cx1, cy0, ch = x + 46, x + w - 16, y + 140, 206
         t0 = now - 12 * 3600
         t1 = max(self.d.utc[self.i1].timestamp(), now + 24 * 3600)
         X = lambda t: cx0 + (t - t0) / (t1 - t0) * (cx1 - cx0)
@@ -546,7 +553,7 @@ class View:
         if not vals:
             text(cr, "Pas de prédictions pour cette période", x + w / 2, y + 250, 14, SUBTLE, False, "c", "m")
             return
-        vmin, vmax = min(vals) - 0.3, max(vals) + 0.6
+        vmin, vmax = min(vals) - 1.0, max(vals) + 1.0                 # room for the two-line labels of highs and lows
         Y = lambda v: cy0 + ch - (v - vmin) / (vmax - vmin) * ch
         cr.set_source_rgb(*SURFACE); rrect(cr, cx0, cy0, cx1 - cx0, ch, 8); cr.fill()
         cr.save(); rrect(cr, cx0, cy0, cx1 - cx0, ch, 8); cr.clip()
@@ -589,7 +596,8 @@ class View:
                 high = kind_ == "H"
                 cr.set_source_rgb(*BG); cr.arc(X(t), Y(v), 4.5, 0, 2 * math.pi); cr.fill()
                 cr.set_source_rgb(*(SKY if high else PEACH)); cr.arc(X(t), Y(v), 3.2, 0, 2 * math.pi); cr.fill()
-                text(cr, f"{fm(v, 1)} · {loc(t):%H:%M}", X(t), Y(v) + (-17 if high else 7), 10, TEXT, True, "c")
+                text(cr, f"{fm(v, 1)} m · {ft(v)} pi", X(t), Y(v) + (-30 if high else 7), 10, TEXT, True, "c")
+                text(cr, f"{loc(t):%H:%M}", X(t), Y(v) + (-17 if high else 19), 10, SUBTLE, False, "c")
         for g in range(math.ceil(vmin / step), int(vmax // step) + 1):
             text(cr, f"{g * step}", cx0 - 6, Y(g * step), 10, MUTED, False, "r", "m")
         for hh in range(first_hour, int(t1) + 3600, 3600):
@@ -606,19 +614,19 @@ class View:
             cr.move_to(X(cursor), cy0); cr.line_to(X(cursor), cy0 + ch); cr.stroke()
 
         # next highs and lows
-        text(cr, "PROCHAINES MARÉES", x + 16, y + 392, 11, BLUE, True)
+        text(cr, "PROCHAINES MARÉES", x + 16, y + 394, 11, BLUE, True)
         nxt = td.next_events(now, 6)
         for k, (t, v, kind_) in enumerate(nxt):
-            ex, ey = x + 16 + (k % 2) * 270, y + 412 + (k // 2) * 34
+            ex, ey = x + 16 + (k % 2) * 276, y + 414 + (k // 2) * 34
             high = kind_ == "H"
             left = max(int((t - now) // 60), 0)
             day = "" if loc(t).date() == loc(now).date() else f" {hrdps.fr(loc(t), '%a')}"
             text(cr, "▲" if high else "▼", ex, ey + 1, 14, SKY if high else PEACH, True)
             text(cr, f"{'Pleine mer' if high else 'Basse mer'}  {loc(t):%H:%M}{day}", ex + 20, ey, 13, TEXT, True)
-            text(cr, f"{fm(v)} m · dans {left // 60} h {left % 60:02d}" if left >= 60 else f"{fm(v)} m · dans {left} min",
-                 ex + 20, ey + 16, 11, SUBTLE)
+            when = f"dans {left // 60} h {left % 60:02d}" if left >= 60 else f"dans {left} min"
+            text(cr, f"{fm(v)} m ({ft(v)} pi) · {when}", ex + 20, ey + 16, 11, SUBTLE)
         if not nxt:
-            text(cr, "Aucune marée prédite pour la suite", x + 16, y + 414, 12, SUBTLE)
+            text(cr, "Aucune marée prédite pour la suite", x + 16, y + 416, 12, SUBTLE)
 
         # legend + source
         ly = y + h - 30
