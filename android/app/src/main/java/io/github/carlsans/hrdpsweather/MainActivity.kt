@@ -130,6 +130,16 @@ class MainActivity : ComponentActivity() {
             return true
         }
 
+        override fun onPageFinished(view: WebView, url: String) {
+            // Once after each installation of a new APK: forget the offline copy of the app files, so that a copy kept
+            // by an older version can never hide the current one. The place, the data and the map tiles are untouched.
+            val prefs = getSharedPreferences("webapp", android.content.Context.MODE_PRIVATE)
+            if (url.startsWith(APP_URL) && prefs.getString("shell_purged_for", "") != BuildConfig.VERSION_NAME) {
+                prefs.edit().putString("shell_purged_for", BuildConfig.VERSION_NAME).apply()
+                view.evaluateJavascript(PURGE_SHELL_JS, null)
+            }
+        }
+
         override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
             if (!request.isForMainFrame) return
             view.loadDataWithBaseURL(null, OFFLINE_PAGE, "text/html", "utf-8", null)
@@ -151,6 +161,11 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         val APP_URL: String = BuildConfig.APP_URL                     // GitHub Pages (debug builds: this computer)
+        private const val PURGE_SHELL_JS =
+            "(async function () { try { var rs = await navigator.serviceWorker.getRegistrations(); " +
+            "for (var r of rs) { await r.unregister(); } var ks = await caches.keys(); " +
+            "for (var k of ks) { if (k.indexOf('shell-') === 0) { await caches.delete(k); } } } catch (e) {} " +
+            "location.reload(); })()"
         private val APP_HOST: String = Uri.parse(APP_URL).host.orEmpty()
         private val APP_PATH: String = Uri.parse(APP_URL).path.orEmpty()
 

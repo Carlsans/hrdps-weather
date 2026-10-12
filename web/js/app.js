@@ -602,6 +602,14 @@ function serviceWorker() {
   navigator.serviceWorker.addEventListener("controllerchange", () => { if (!reloading) { reloading = true; location.reload(); } });
 }
 
+/** Escape hatch for a stuck copy of the app: forget the offline copy of the app files (not the data, the place or the
+ *  map tiles) and reload. Nothing else is touched, so there is never a need to clear the app's data. */
+async function reloadApp() {
+  try { for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister(); } catch { /* none */ }
+  try { for (const k of await caches.keys()) if (k.startsWith("shell-")) await caches.delete(k); } catch { /* none */ }
+  location.reload();
+}
+
 // ── start ────────────────────────────────────────────────────────────────────
 async function main() {
   $("version").textContent = VERSION;
@@ -611,6 +619,7 @@ async function main() {
   mapInput(); sliderInput(); chartInput(); keyboard(); settingsDialog();
   $("place-btn").addEventListener("click", () => openSettings(false));
   $("refresh").addEventListener("click", () => refresh(true));
+  $("reload-app").addEventListener("click", reloadApp);
   try {                                                             // Android app: offer to add the widget
     if (window.HrdpsAndroid?.canPinWidget?.()) {
       $("pin-widget").hidden = false;
