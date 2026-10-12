@@ -74,9 +74,15 @@ jobs:
       - name: Test the installer end to end (install, run, uninstall)
         shell: pwsh
         run: |
-          .\dist\hrdps-weather-setup-x86_64.exe /S
-          Start-Sleep -Seconds 10
+          # A silent NSIS installer returns at once: wait for what it writes instead of a fixed pause (a slow runner
+          # needed more than 10 s once, which failed an otherwise healthy build).
+          function Wait-For($what, $test, $seconds = 90) {
+            for ($i = 0; $i -lt $seconds; $i++) { if (& $test) { return }; Start-Sleep -Seconds 1 }
+            throw "timed out after $seconds s waiting for: $what"
+          }
           $dir = "$env:LOCALAPPDATA\Programs\hrdps-weather"
+          .\dist\hrdps-weather-setup-x86_64.exe /S
+          Wait-For "the uninstaller to be written (end of the installation)" { Test-Path "$dir\uninstall.exe" }
           foreach ($f in @("hrdps-weather.exe", "hrdps-weather-tray.exe", "uninstall.exe", "_internal")) {
             if (-not (Test-Path "$dir\$f")) { throw "installer did not place $f" }
           }
@@ -84,8 +90,7 @@ jobs:
           $out = (& "$dir\hrdps-weather.exe" selftest | Out-String)
           if ($out -notmatch "render=ok") { throw "installed selftest failed: $out" }
           & "$dir\uninstall.exe" /S
-          Start-Sleep -Seconds 10
-          if (Test-Path "$dir\hrdps-weather.exe") { throw "uninstaller left files behind" }
+          Wait-For "the uninstaller to remove the program" { -not (Test-Path "$dir\hrdps-weather.exe") }
           Write-Host "install -> run -> uninstall OK"
           exit 0
 
