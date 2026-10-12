@@ -51,6 +51,8 @@ def run_gtk():
             return None
         v = wv.View(d, tiles, prefetch_radar=tiles.network)
         v.updater = updater
+        if os.environ.get("HRDPS_LAYER") in [k for k, _ in wv.LAYERS]:      # debugging aid: open on a given tab
+            v.layer = os.environ["HRDPS_LAYER"]
         v.climate = normals
         v.tides = tide_loader
         v.status = "Cartes en téléchargement…"
@@ -88,6 +90,34 @@ def run_gtk():
         win.set_child(area)
         state["area"] = area
 
+        def device_scale():
+            """Real pixels per logical pixel (1.3 on a 130 % display)."""
+            try:
+                return max(1.0, float(area.get_native().get_surface().get_scale()))
+            except Exception:
+                return float(max(1, area.get_scale_factor()))
+
+        def paint_frame(v, cr, w, h):
+            """Render the frame ourselves, at the device resolution, and paint the finished pixels.
+
+            Drawing the text straight onto GTK's context makes GTK record the drawing and replay it at the display
+            scale; with a fractional scale (1.3) cairo then clips the top of some glyph runs. Painting an image that is
+            already at the device resolution avoids the replay of any text."""
+            import cairo
+            s = device_scale()
+            pw, ph = max(1, round(w * s)), max(1, round(h * s))
+            img = state.get("img")
+            if img is None or (img.get_width(), img.get_height()) != (pw, ph):
+                img = state["img"] = cairo.ImageSurface(cairo.FORMAT_ARGB32, pw, ph)
+            v.draw(cairo.Context(img), pw, ph)
+            img.flush()
+            cr.save()
+            cr.scale(w / pw, h / ph)                          # 1 image pixel = 1 device pixel
+            cr.set_source_surface(img, 0, 0)
+            cr.get_source().set_filter(cairo.FILTER_NEAREST)
+            cr.paint()
+            cr.restore()
+
         def draw(_a, cr, w, h):
             v = state["view"]
             if v is None:
@@ -95,7 +125,7 @@ def run_gtk():
                 wv.text(cr, "Téléchargement des données HRDPS…", w / 2, h / 2, 22, wv.SUBTLE, False, "c", "m")
                 wv.text(cr, "(≈1 minute la première fois)", w / 2, h / 2 + 34, 14, wv.MUTED, False, "c", "m")
             else:
-                v.draw(cr, w, h)
+                paint_frame(v, cr, w, h)
         area.set_draw_func(draw)
 
         # ── interaction ───────────────────────────────────────────────────────
