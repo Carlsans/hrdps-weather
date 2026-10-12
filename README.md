@@ -146,13 +146,11 @@ position personnelle ; la vôtre reste dans votre fichier de configuration.
 
 ## Fenêtre
 
-En bas de la fenêtre, sous les détails de l'heure choisie : **Soleil et lune** (lever, coucher, durée du jour et
-écart avec la veille, midi solaire, aube civile, phase de la lune et prochaine pleine lune — calculés sur place),
-**normales climatiques** de la station d'Environnement Canada la plus proche (1981–2010 : normales du jour,
-comparaison avec les températures prévues aujourd'hui et demain, précipitations, neige, ensoleillement, vent du
-mois), **saison** (dates moyennes des premiers et derniers gels, jours de gel et d'orage) et deux **liens**
-officiels : la page des prévisions d'Environnement Canada pour votre position (conditions, prévisions, radar,
-alertes) et la page des normales de la station.
+En bas de la fenêtre, sous les détails de l'heure choisie : le **lever et le coucher du soleil** (calculés sur
+place) avec la durée du jour et son écart avec la veille, les **normales climatiques** de la station d'Environnement
+Canada la plus proche (1981–2010 : normales du jour, comparaison avec les températures prévues aujourd'hui et
+demain, précipitations, neige, ensoleillement et vent du mois) et un **lien** vers la page officielle des
+prévisions d'Environnement Canada pour votre position (conditions, prévisions, radar, alertes).
 
 **Carte** — molette ou boutons **+ / −** : zoom (autour du curseur) ; glisser : déplacer ; double-clic : zoom avant ;
 bouton ◎ ou touche `0` : recentrer. Couches : précipitations, température, vent, nuages (prévision HRDPS) et

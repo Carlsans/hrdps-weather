@@ -1,23 +1,22 @@
-"""Sun/moon maths, climate normals (fake API), links and the bottom strip."""
+"""Sunrise/sunset maths, climate normals (fake API), links and the bottom strip."""
 import json
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import date
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
 
-from hrdps_weather import astro, climate, hrdps, links, view
+from hrdps_weather import astro, climate, links, view
 
 TZ = ZoneInfo("America/Toronto")
-UTC = timezone.utc
 
 
-# ── sun and moon ─────────────────────────────────────────────────────────────
-def test_equinox_day_is_about_twelve_hours_and_noon_is_noon():
+# ── sun ─────────────────────────────────────────────────────────────
+def test_equinox_day_is_about_twelve_hours():
     s = astro.sun_times(date(2026, 3, 20), 46.8, -71.2, TZ)
     assert 11.9 * 3600 < s["length"] < 12.3 * 3600
-    assert s["sunrise"] < s["noon"] < s["sunset"] and s["dawn"] < s["sunrise"] and s["sunset"] < s["dusk"]
+    assert s["sunrise"] < s["sunset"] and s["sunrise"].tzinfo is not None
 
 
 def test_solstices_and_polar_cases():
@@ -36,24 +35,6 @@ def test_days_get_shorter_after_the_solstice_and_longer_after_december():
     assert f(date(2026, 1, 12)) > f(date(2026, 1, 11))
 
 
-@pytest.mark.parametrize("start, key, expected", [
-    (datetime(2026, 10, 12, 12, tzinfo=UTC), "next_full", datetime(2026, 10, 26, 4, 12, tzinfo=UTC)),
-    (datetime(2026, 10, 12, 12, tzinfo=UTC), "next_new", datetime(2026, 11, 9, 7, 2, tzinfo=UTC)),
-    (datetime(2024, 1, 20, tzinfo=UTC), "next_full", datetime(2024, 1, 25, 17, 54, tzinfo=UTC)),
-    (datetime(2024, 1, 5, tzinfo=UTC), "next_new", datetime(2024, 1, 11, 11, 57, tzinfo=UTC)),
-])
-def test_moon_phases_match_published_times(start, key, expected):
-    got = astro.moon(start)[key]
-    assert abs((got - expected).total_seconds()) < 20 * 60            # within 20 minutes
-
-
-def test_moon_illumination_and_names():
-    assert astro.moon(datetime(2024, 1, 11, 12, tzinfo=UTC))["illumination"] < 0.01
-    full = astro.moon(datetime(2024, 1, 25, 18, tzinfo=UTC))
-    assert full["illumination"] > 0.99 and full["name"] == "Pleine lune"
-    assert astro.moon(datetime(2024, 1, 18, 3, 53, tzinfo=UTC))["name"] == "Premier quartier"
-
-
 def test_signed_never_shows_minus_zero():
     assert view.signed(-0.4) == "0°" and view.signed(2.6) == "+3°" and view.signed(-2.6) == "−3°"
     assert view.signed(-3, " min") == "−3 min"
@@ -65,9 +46,9 @@ def fake_api(monkeypatch, stations=None):
     temp = [-12.8, -11.0, -5.0, 2.5, 10.0, 15.5, 18.5, 17.5, 12.5, 6.5, 0.5, -8.5]
     rows = {5315: {"Mean daily temperature deg C": temp, "Mean daily max temperature deg C": [t + 5 for t in temp],
                    "Mean daily min temperature deg C": [t - 5 for t in temp],
-                   "Total precipitation mm": [90] * 12, "Mean date last frost in spring": {13: 143}},
+                   "Total precipitation mm": [90] * 12},
             5251: {"Total hours bright sunshine": [100 + 10 * i for i in range(12)],
-                   "Mean of hourly wind speed kmh": [14] * 12, "Mean date first frost in fall": {13: 268}}}
+                   "Mean of hourly wind speed kmh": [14] * 12}}
     calls = []
 
     def get(url, ua, timeout=30, tries=2):
@@ -97,7 +78,6 @@ def test_build_merges_stations_nearest_first(monkeypatch):
     d = climate.build(46.76, -71.24)
     assert d["monthly"]["tmean"][0] == -12.8 and d["src"]["tmean"][1] == "BEAUSEJOUR"
     assert d["src"]["sun"][1].startswith("QUEBEC")                    # missing at the nearest station: taken from the next one
-    assert d["annual"] == {"frost_last": 143, "frost_first": 268}
     assert climate.build(46.76, -71.24)["period"] == "1981–2010"
 
 
@@ -139,14 +119,9 @@ def test_loader_without_network_stays_empty(isolated, monkeypatch):
     assert ld.normals is None and not calls
 
 
-def test_frost_date_text():
-    assert climate.doy_text(131) == "11 mai" and climate.doy_text(277) == "4 oct."
-
-
 # ── links ────────────────────────────────────────────────────────────────────
 def test_urls():
     assert links.forecast_url(46.75817, -71.24036) == "https://meteo.gc.ca/fr/location/index.html?coords=46.758,-71.240"
-    assert links.normals_url(5251).endswith("stnID=5251&autofwd=1") and links.normals_url(5251).startswith("https://climat.meteo.gc.ca/")
 
 
 def test_open_url_refuses_non_http(monkeypatch):
@@ -179,4 +154,4 @@ def test_strip_draws_with_and_without_normals(data, monkeypatch):
         v.draw(Context(ImageSurface(FORMAT_ARGB32, view.W, view.H)), view.W, view.H)
         assert getattr(v, "errors", 0) == 0
         urls = [a for _, t, a in v.hits if t == "link"]
-        assert (len(urls) == 2) == bool(loader and loader.normals) and urls[0].startswith("https://meteo.gc.ca/")
+        assert len(urls) == 1 and urls[0].startswith("https://meteo.gc.ca/")

@@ -898,7 +898,7 @@ class View:
         text(cr, "maintenant" if off == 0 else f"dans {off} h" if off > 0 else f"il y a {-off} h", M + 300, y0 + 1, 11, MUTED)
 
 
-    # almanac strip: sun, moon, climate normals, official links ------------------------------
+    # almanac strip: sunrise/sunset, climate normals, official link --------------------------
     def draw_almanac(self, cr):
         d = self.d
         y0 = 926
@@ -908,7 +908,6 @@ class View:
         sun = astro.sun_times(today, hrdps.LAT, hrdps.LON, tz)
         before = astro.sun_times(today - timedelta(days=1), hrdps.LAT, hrdps.LON, tz)
         hm = lambda t: t.strftime("%H:%M") if t else "—"
-        moon = astro.moon(now)
 
         def row(x, y, parts, size=12):
             """One line made of (text, color, bold) pieces laid out left to right."""
@@ -918,16 +917,13 @@ class View:
 
         L, B = SUBTLE, TEXT
         x = M + 16
-        text(cr, "SOLEIL ET LUNE", x, y0 + 8, 11, BLUE, True)
-        row(x, y0 + 28, [("Lever", L, False), (hm(sun["sunrise"]), PEACH, True), ("   Coucher", L, False), (hm(sun["sunset"]), PEACH, True)])
+        text(cr, "SOLEIL", x, y0 + 8, 11, BLUE, True)
+        row(x, y0 + 30, [("Lever", L, False), (hm(sun["sunrise"]), PEACH, True)], 13)
+        row(x, y0 + 52, [("Coucher", L, False), (hm(sun["sunset"]), PEACH, True)], 13)
         diff = signed((sun["length"] - before["length"]) / 60, " min")
-        row(x, y0 + 46, [("Durée", L, False), (astro.fmt_duration(sun["length"]), B, True),
-                         (f"({diff} vs hier)", L, False)])
-        row(x, y0 + 64, [("Midi solaire", L, False), (hm(sun["noon"]), B, True), ("  Aube civile", L, False), (hm(sun["dawn"]), B, True)])
-        row(x, y0 + 82, [(f"Lune : {moon['name']}", L, False), (f"{moon['illumination']:.0%}", B, True),
-                         ("· pleine lune", L, False), (hrdps.fr(moon["next_full"].astimezone(tz), "%d %b"), B, True)])
+        row(x, y0 + 74, [("Durée", L, False), (astro.fmt_duration(sun["length"]), B, True), (f"({diff} vs hier)", L, False)])
 
-        x = M + 16 + 330
+        x = M + 16 + 250
         cl = self.climate
         nm = cl.normals if cl else None
         if nm is None:
@@ -970,31 +966,13 @@ class View:
                 bits += [("vent", L, False), (f"{nm.month('wind', m):.0f} km/h", B, True)]
             row(x, y0 + 82, bits or [("—", L, False)])
 
-        # frost / storms column
-        x = M + 16 + 330 + 530
-        if nm is not None:
-            text(cr, "SAISON", x, y0 + 8, 11, BLUE, True)
-            fl, ff = nm.annual("frost_last"), nm.annual("frost_first")
-            if fl and ff:
-                row(x, y0 + 28, [("Gel moyen : dernier", L, False), (climate.doy_text(fl), B, True)])
-                row(x, y0 + 46, [("premier à l'automne", L, False), (climate.doy_text(ff), B, True)])
-            if nm.has("frostdays"):
-                row(x, y0 + 64, [("Jours de gel (mois)", L, False), (f"{nm.month('frostdays', today.month):.0f}", B, True)])
-            if nm.has("thunder"):
-                row(x, y0 + 82, [("Jours d'orage (mois)", L, False), (f"{nm.month('thunder', today.month):.1f}", B, True)])
-
-        # official links
-        bx, bw = W - M - 252, 236
-        buttons = [("Prévisions Environnement Canada  ↗", links.forecast_url())]
-        st = nm.station("tmean") if nm else None
-        if st:
-            buttons.append(("Normales de la station  ↗", links.normals_url(st["id"])))
-        for k, (label, url) in enumerate(buttons):
-            by = y0 + 12 + k * 34
-            cr.set_source_rgb(*PANEL); rrect(cr, bx, by, bw, 28, 8); cr.fill()
-            cr.set_source_rgba(*BLUE, 0.7); cr.set_line_width(1); rrect(cr, bx + 0.5, by + 0.5, bw - 1, 27, 8); cr.stroke()
-            text(cr, label, bx + bw / 2, by + 14, 12, BLUE, True, "c", "m")
-            self.hits.append(((bx, by, bw, 28), "link", url))
+        # official forecast page
+        bx, bw, by = W - M - 252, 236, y0 + 38
+        url = links.forecast_url()
+        cr.set_source_rgb(*PANEL); rrect(cr, bx, by, bw, 28, 8); cr.fill()
+        cr.set_source_rgba(*BLUE, 0.7); cr.set_line_width(1); rrect(cr, bx + 0.5, by + 0.5, bw - 1, 27, 8); cr.stroke()
+        text(cr, "Prévisions Environnement Canada  ↗", bx + bw / 2, by + 14, 12, BLUE, True, "c", "m")
+        self.hits.append(((bx, by, bw, 28), "link", url))
         text(cr, "Source : Environnement et Changement climatique Canada", W - M - 16, y0 + 84, 9, MUTED, False, "r")
 
 

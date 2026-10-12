@@ -15,11 +15,6 @@ def forecast_url(lat=None, lon=None):
     return f"https://meteo.gc.ca/fr/location/index.html?coords={lat:.3f},{lon:.3f}"
 
 
-def normals_url(station_id):
-    """Official 1981–2010 climate-normals page of a station."""
-    return f"https://climat.meteo.gc.ca/climate_normals/results_1981_2010_f.html?stnID={int(station_id)}&autofwd=1"
-
-
 def open_url(url):
     """Open `url` in the default browser. Only http(s) links are ever opened."""
     if not url.startswith(("https://", "http://")):

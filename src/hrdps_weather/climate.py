@@ -17,17 +17,13 @@ UA = f"hrdps-weather/{__version__} (+https://github.com/Carlsans/hrdps-weather)"
 MAX_AGE = 60 * 24 * 3600
 PERIOD = "1981–2010"
 
-# key -> element name in the API. Months 1..12 are the monthly normals, month 13 is the annual value.
+# key -> element name in the API (months 1..12 are the monthly normals).
 ELEMENTS = {
     "tmean": "Mean daily temperature deg C", "tmax": "Mean daily max temperature deg C",
     "tmin": "Mean daily min temperature deg C",
-    "precip": "Total precipitation mm", "rain": "Total rainfall mm", "snow": "Total snowfall cm",
-    "pdays": "Days with precipitation GE 0.2 mm", "sdays": "Days with snowfall GE 0.2 cm",
+    "precip": "Total precipitation mm", "snow": "Total snowfall cm",
+    "pdays": "Days with precipitation GE 0.2 mm",
     "sun": "Total hours bright sunshine", "wind": "Mean of hourly wind speed kmh",
-    "thunder": "Days with thunderstorms", "hot30": "Days with daily max temperature GT 30 deg C",
-    "frostdays": "Days with daily min temperature LE 0 deg C",
-    "frost_last": "Mean date last frost in spring", "frost_first": "Mean date first frost in fall",
-    "frostfree": "Mean length frost-free period in days",
 }
 _BY_NAME = {v: k for k, v in ELEMENTS.items()}
 MONTHS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre",
@@ -70,7 +66,7 @@ def build(lat, lon):
     cands = nearest_stations(lat, lon)
     if not cands:
         return None
-    out = {"lat": lat, "lon": lon, "period": PERIOD, "monthly": {}, "annual": {}, "src": {}, "fetched": time.time()}
+    out = {"lat": lat, "lon": lon, "period": PERIOD, "monthly": {}, "src": {}, "fetched": time.time()}
     for km, stn, name in cands:
         feats = _items(f"{API}/climate-normals/items?f=json&limit=2000&STN_ID={stn}")
         if not feats:
@@ -85,10 +81,7 @@ def build(lat, lon):
             if key not in out["monthly"] and all(m in months for m in range(1, 13)):
                 out["monthly"][key] = [months[m] for m in range(1, 13)]
                 out["src"][key] = [stn, name, round(km, 1)]
-            if key in ("frost_last", "frost_first", "frostfree") and 13 in months and key not in out["annual"]:
-                out["annual"][key] = months[13]
-                out["src"][key] = [stn, name, round(km, 1)]
-        if all(k in out["monthly"] or k in out["annual"] for k in ELEMENTS):
+        if all(k in out["monthly"] for k in ELEMENTS):
             break                                            # complete: no need to ask further stations
     return out if "tmean" in out["monthly"] else None
 
@@ -132,21 +125,9 @@ class Normals:
     def period(self):
         return self.d.get("period", PERIOD)
 
-    def annual(self, key):
-        return self.d["annual"].get(key)
-
 
 def pretty_station(name):
     return name.title().replace("Intl", "Int.").replace("/", " / ") if name else ""
-
-
-SHORT = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."]
-
-
-def doy_text(doy, year=2026):
-    """Day of year -> '11 mai'."""
-    d = date.fromordinal(date(year, 1, 1).toordinal() + int(doy) - 1)
-    return f"{d.day} {SHORT[d.month - 1]}"
 
 
 class Loader:
