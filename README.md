@@ -70,7 +70,10 @@ ensemble :
   heures** (mêmes règles que la fenêtre de bureau : verglas, grésil, rafales, forte pluie, neige, gel, orage) et
   une **bande horaire** jusqu'à +12 h (icône, température, millimètres ou probabilité toutes les 2 heures).
 
-- L'application est l'application web ci-dessous dans une fenêtre Android : elle se met à jour toute seule.
+- L'application est l'application web ci-dessous dans une fenêtre Android : elle se met à jour toute seule — à
+  l'ouverture (changement appliqué sans rien toucher) et à chaque retour au premier plan (un bandeau propose alors de
+  recharger, pour ne pas interrompre ce que vous faisiez). Pour une mise à jour déjà publiée qui n'apparaît pas :
+  fermez complètement l'application (balayer dans les applications récentes) et rouvrez-la.
 - Les widgets se rafraîchissent environ toutes les 30 minutes en arrière-plan, quand le réseau est disponible, et
   seulement si le run ou l'heure a changé : ~30 petites requêtes GeoMet par heure avec le widget 3×2, ~170 avec le
   4×3 (valeurs au point heure par heure sur 12 h), soit quelques Mo par jour.

@@ -83,6 +83,10 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         web.onResume()
+        // The page stays in memory while the app is in the background, so the browser never navigates to it again and
+        // never looks for a new version by itself: ask the service worker every time the app comes back.
+        web.evaluateJavascript(
+            "navigator.serviceWorker && navigator.serviceWorker.getRegistration().then(function (r) { if (r) r.update(); })", null)
     }
 
     override fun onPause() {

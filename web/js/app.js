@@ -573,10 +573,14 @@ async function changePlace() {
 }
 
 // ── service worker (offline + installable) ───────────────────────────────────
+const AUTO_APPLY_MS = 20e3;              // an update found this soon after the page opened is applied silently
 function serviceWorker() {
   if (!("serviceWorker" in navigator)) return;
   navigator.serviceWorker.register("sw.js").then((reg) => {
+    // Just opened: switch to the new version at once (one quick reload). Later: ask, so that a session in progress
+    // (scrubbing the time, panning the map) is not interrupted.
     const offer = (w) => {
+      if (performance.now() < AUTO_APPLY_MS) { w.postMessage("skip-waiting"); return; }
       const b = $("banner");
       b.hidden = false;
       b.onclick = () => w.postMessage("skip-waiting");
@@ -586,7 +590,13 @@ function serviceWorker() {
       const w = reg.installing;
       w?.addEventListener("statechange", () => { if (w.state === "installed" && navigator.serviceWorker.controller) offer(w); });
     });
-    setInterval(() => reg.update().catch(() => {}), 3600e3);
+    // A browser looks for a new version by itself only when a page is *navigated to* (and at most once a day). An app
+    // that stays in memory (the Android app, an installed PWA) is resumed, not navigated: that is how updates went
+    // unnoticed. So look at startup, every time the app comes back to the foreground, and every half hour.
+    const check = () => reg.update().catch(() => {});
+    check();
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) check(); });
+    setInterval(check, 30 * 60e3);
   }).catch(() => {});
   let reloading = false;
   navigator.serviceWorker.addEventListener("controllerchange", () => { if (!reloading) { reloading = true; location.reload(); } });
