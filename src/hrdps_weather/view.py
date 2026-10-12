@@ -6,10 +6,12 @@ import math
 import os
 import sys
 import time
+from datetime import timedelta
+import time
 
 import cairo
 
-from . import hrdps
+from . import astro, climate, hrdps, links
 
 # Text: Pango (colour emoji, nice shaping) when PyGObject is installed (typical on Linux),
 # otherwise cairo's built-in "toy" text API (Windows: pip-installed pycairo only).
@@ -35,7 +37,7 @@ RED, PEACH, YELLOW, GREEN = hx("f38ba8"), hx("fab387"), hx("f9e2af"), hx("a6e3a1
 TEAL, SKY, BLUE, LAV, MAUVE = hx("94e2d5"), hx("89dceb"), hx("89b4fa"), hx("b4befe"), hx("cba6f7")
 SNOWC = hx("e6e9ff")
 
-W, H = 1400, 924
+W, H = 1400, 1040
 M = 18
 MAP_RECT = (M, 116, 560, 560)
 CHART_RECT = (612, 110, 770, 680)
@@ -133,6 +135,12 @@ def _bilinear(a, R, C):
     return (a[r0, c0] * (1 - fr) * (1 - fc) + a[r0, c1] * (1 - fr) * fc
             + a[r1, c0] * fr * (1 - fc) + a[r1, c1] * fr * fc)
 
+def signed(v, unit="°"):
+    """+3° / −2° / 0° (never '−0°')."""
+    r = round(v)
+    return f"0{unit}" if r == 0 else f"{r:+d}{unit}".replace("-", "−")
+
+
 def world_xy(lon, lat, z):
     """Web Mercator pixel coordinates (256-px tiles) of lon/lat at (fractional) zoom z. Works on arrays."""
     import numpy as np
@@ -201,6 +209,7 @@ class View:
         self.d = data
         self.prefetch_radar = prefetch_radar                       # warm the radar in the background (UI only)
         self.updater = None                                        # update.Updater: shows an update banner
+        self.climate = None                                        # climate.Loader: normals for the bottom strip
         self.i0, self.i1 = data.now_index(), data.n - 1
         self.t = float(self.i0)
         self.layer, self.playing, self.speed = "rt", True, 2.0       # speed: model hours per second
@@ -211,7 +220,7 @@ class View:
         self.radar = None                                          # radar.RadarLoader, created on first use
         self.rt = 0.0                                              # radar frame cursor (float index)
         self.reset_camera()
-        self._seen = (-1, -1)
+        self._seen = (-1, -1, False)
         self._pan0 = None
 
     # -- camera ----------------------------------------------------------------
@@ -354,7 +363,8 @@ class View:
 
     def poll(self):
         """True when something that arrived in the background (tiles, radar) should trigger a redraw."""
-        seen = (self.tiles.version if self.tiles else -1, self.radar.version if self.radar else -1)
+        seen = (self.tiles.version if self.tiles else -1, self.radar.version if self.radar else -1,
+                bool(self.climate and self.climate.normals))
         changed = seen != self._seen
         self._seen = seen
         return changed
@@ -378,7 +388,8 @@ class View:
         self.hits = []
         cr.save(); cr.scale(w / W, h / H)
         cr.set_source_rgb(*BG); cr.paint()
-        for section in (self.draw_header, self.draw_map, self.draw_controls, self.draw_charts, self.draw_details):
+        for section in (self.draw_header, self.draw_map, self.draw_controls, self.draw_charts, self.draw_details,
+                        self.draw_almanac):
             try:
                 section(cr)
             except Exception as e:                         # never leave a half-drawn window without a reason
@@ -887,6 +898,106 @@ class View:
         text(cr, "maintenant" if off == 0 else f"dans {off} h" if off > 0 else f"il y a {-off} h", M + 300, y0 + 1, 11, MUTED)
 
 
+    # almanac strip: sun, moon, climate normals, official links ------------------------------
+    def draw_almanac(self, cr):
+        d = self.d
+        y0 = 926
+        cr.set_source_rgb(*SURFACE); rrect(cr, M, y0, W - 2 * M, 104, 10); cr.fill()
+        now = d.local[d.now_index()]
+        today, tz = now.date(), hrdps.TZ
+        sun = astro.sun_times(today, hrdps.LAT, hrdps.LON, tz)
+        before = astro.sun_times(today - timedelta(days=1), hrdps.LAT, hrdps.LON, tz)
+        hm = lambda t: t.strftime("%H:%M") if t else "—"
+        moon = astro.moon(now)
+
+        def row(x, y, parts, size=12):
+            """One line made of (text, color, bold) pieces laid out left to right."""
+            for txt, col, bold in parts:
+                x += text(cr, txt, x, y, size, col, bold) + 4
+            return x
+
+        L, B = SUBTLE, TEXT
+        x = M + 16
+        text(cr, "SOLEIL ET LUNE", x, y0 + 8, 11, BLUE, True)
+        row(x, y0 + 28, [("Lever", L, False), (hm(sun["sunrise"]), PEACH, True), ("   Coucher", L, False), (hm(sun["sunset"]), PEACH, True)])
+        diff = signed((sun["length"] - before["length"]) / 60, " min")
+        row(x, y0 + 46, [("Durée", L, False), (astro.fmt_duration(sun["length"]), B, True),
+                         (f"({diff} vs hier)", L, False)])
+        row(x, y0 + 64, [("Midi solaire", L, False), (hm(sun["noon"]), B, True), ("  Aube civile", L, False), (hm(sun["dawn"]), B, True)])
+        row(x, y0 + 82, [(f"Lune : {moon['name']}", L, False), (f"{moon['illumination']:.0%}", B, True),
+                         ("· pleine lune", L, False), (hrdps.fr(moon["next_full"].astimezone(tz), "%d %b"), B, True)])
+
+        x = M + 16 + 330
+        cl = self.climate
+        nm = cl.normals if cl else None
+        if nm is None:
+            if cl is not None:                                     # no loader at all (still images): show nothing
+                msg = ("Normales climatiques : chargement…" if cl.state == "loading"
+                       else "Normales climatiques indisponibles (réseau ?)")
+                text(cr, msg, x, y0 + 8, 11, MUTED, True)
+        else:
+            st = nm.station("tmean")
+            title = (f"NORMALES {nm.period} — {climate.pretty_station(st['name'])} ({st['km']:.0f} km)" if st
+                     else f"NORMALES {nm.period}")
+            text(cr, title, x, y0 + 8, 11, BLUE, True)
+            n = {k: nm.daily(k, today) for k in ("tmean", "tmax", "tmin") if nm.has(k)}
+            row(x, y0 + 28, [(f"Normale du jour ({today.day} {climate.MONTHS[today.month - 1]})", L, False),
+                             (f"max {n['tmax']:.0f}°", B, True), (f"min {n['tmin']:.0f}°", B, True),
+                             (f"moy. {n['tmean']:.0f}°", B, True)] if n else [("—", L, False)])
+            for k, (lab, day) in enumerate((("Aujourd'hui", today), ("Demain", today + timedelta(days=1)))):
+                idx = [i for i, t in enumerate(d.local) if t.date() == day and d.tt[i] is not None]
+                if idx and n:
+                    nmax, nmin = nm.daily("tmax", day), nm.daily("tmin", day)
+                    hi, lo = max(d.tt[i] for i in idx), min(d.tt[i] for i in idx)
+                    dh, dl = hi - nmax, lo - nmin
+                    dc = lambda v: PEACH if v > 0.5 else SKY if v < -0.5 else SUBTLE
+                    part = "" if len(idx) >= 20 else " (partiel)"
+                    row(x, y0 + 46 + 18 * k, [(f"{lab} prévu{part}", L, False), (f"max {hi:.0f}°", B, True),
+                                              (signed(dh), dc(dh), True), (" min", L, False),
+                                              (f"{lo:.0f}°", B, True), (signed(dl), dc(dl), True),
+                                              ("vs normale", L, False)])
+            m = today.month
+            bits = []
+            if nm.has("precip"):
+                bits += [("Mois :", L, False), (f"{nm.month('precip', m):.0f} mm", B, True)]
+                if nm.has("pdays"):
+                    bits += [(f"({nm.month('pdays', m):.0f} j)", L, False)]
+            if nm.has("snow") and nm.month("snow", m) >= 0.5:
+                bits += [("neige", L, False), (f"{nm.month('snow', m):.0f} cm", B, True)]
+            if nm.has("sun"):
+                bits += [("soleil", L, False), (f"{nm.month('sun', m):.0f} h", B, True)]
+            if nm.has("wind"):
+                bits += [("vent", L, False), (f"{nm.month('wind', m):.0f} km/h", B, True)]
+            row(x, y0 + 82, bits or [("—", L, False)])
+
+        # frost / storms column
+        x = M + 16 + 330 + 530
+        if nm is not None:
+            text(cr, "SAISON", x, y0 + 8, 11, BLUE, True)
+            fl, ff = nm.annual("frost_last"), nm.annual("frost_first")
+            if fl and ff:
+                row(x, y0 + 28, [("Gel moyen : dernier", L, False), (climate.doy_text(fl), B, True)])
+                row(x, y0 + 46, [("premier à l'automne", L, False), (climate.doy_text(ff), B, True)])
+            if nm.has("frostdays"):
+                row(x, y0 + 64, [("Jours de gel (mois)", L, False), (f"{nm.month('frostdays', today.month):.0f}", B, True)])
+            if nm.has("thunder"):
+                row(x, y0 + 82, [("Jours d'orage (mois)", L, False), (f"{nm.month('thunder', today.month):.1f}", B, True)])
+
+        # official links
+        bx, bw = W - M - 252, 236
+        buttons = [("Prévisions Environnement Canada  ↗", links.forecast_url())]
+        st = nm.station("tmean") if nm else None
+        if st:
+            buttons.append(("Normales de la station  ↗", links.normals_url(st["id"])))
+        for k, (label, url) in enumerate(buttons):
+            by = y0 + 12 + k * 34
+            cr.set_source_rgb(*PANEL); rrect(cr, bx, by, bw, 28, 8); cr.fill()
+            cr.set_source_rgba(*BLUE, 0.7); cr.set_line_width(1); rrect(cr, bx + 0.5, by + 0.5, bw - 1, 27, 8); cr.stroke()
+            text(cr, label, bx + bw / 2, by + 14, 12, BLUE, True, "c", "m")
+            self.hits.append(((bx, by, bw, 28), "link", url))
+        text(cr, "Source : Environnement et Changement climatique Canada", W - M - 16, y0 + 84, 9, MUTED, False, "r")
+
+
 def render_png(path, data, layer="rt", hour=None, maps=None, tiles=None, wait=False):
     """Render one still image. With `tiles` (a TileCache) and wait=True the base map is downloaded first."""
     v = View(data, tiles)
@@ -896,6 +1007,12 @@ def render_png(path, data, layer="rt", hour=None, maps=None, tiles=None, wait=Fa
     v.set_maps(maps)
     surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, W, H)
     if wait:
+        v.climate = climate.Loader()                         # cached normals, else a one-off download
+        v.climate.start()
+        for _ in range(100):
+            if v.climate.normals or v.climate.state == "missing":
+                break
+            time.sleep(0.1)
         v.draw(cairo.Context(surf), W, H)                   # first pass only schedules the downloads
         if tiles is not None:
             tiles.wait()

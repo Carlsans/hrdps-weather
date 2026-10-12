@@ -146,6 +146,14 @@ position personnelle ; la vôtre reste dans votre fichier de configuration.
 
 ## Fenêtre
 
+En bas de la fenêtre, sous les détails de l'heure choisie : **Soleil et lune** (lever, coucher, durée du jour et
+écart avec la veille, midi solaire, aube civile, phase de la lune et prochaine pleine lune — calculés sur place),
+**normales climatiques** de la station d'Environnement Canada la plus proche (1981–2010 : normales du jour,
+comparaison avec les températures prévues aujourd'hui et demain, précipitations, neige, ensoleillement, vent du
+mois), **saison** (dates moyennes des premiers et derniers gels, jours de gel et d'orage) et deux **liens**
+officiels : la page des prévisions d'Environnement Canada pour votre position (conditions, prévisions, radar,
+alertes) et la page des normales de la station.
+
 **Carte** — molette ou boutons **+ / −** : zoom (autour du curseur) ; glisser : déplacer ; double-clic : zoom avant ;
 bouton ◎ ou touche `0` : recentrer. Couches : précipitations, température, vent, nuages (prévision HRDPS) et
 **radar** (observé : les 3 dernières heures, une image toutes les 6 min, pluie et neige ; il se recharge pour la zone
@@ -157,15 +165,16 @@ curseur parcourt les images du radar ; les graphiques restent sur l'heure choisi
 
 ## Données, réseau et vie privée
 
-Aucun compte, aucune clé d'API, aucune télémétrie. Seuls deux hôtes sont contactés :
+Aucun compte, aucune clé d'API, aucune télémétrie. Seuls ces hôtes sont contactés (plus ceux des mises à jour, si vous les activez) :
 
 | Hôte | Pourquoi |
 | --- | --- |
 | `geo.weather.gc.ca` (MSC GeoMet) | séries horaires au point et grilles de la carte (HRDPS), images du radar |
+| `api.weather.gc.ca` | normales climatiques de la station la plus proche (une fois, puis gardées 2 mois dans le cache) |
 | `tile.openstreetmap.org` | tuiles du fond de carte, **à la demande** selon la zone et le zoom affichés (mises en cache sur le disque) |
 | `carlsans.github.io` | application web seulement : ses propres fichiers (GitHub Pages) |
 
-Votre position n'est envoyée qu'à GeoMet, sous forme d'une petite zone autour du point (comme toute requête WMS).
+Les liens du bas de la fenêtre ne s'ouvrent dans votre navigateur que si vous cliquez dessus. Votre position n'est envoyée qu'à GeoMet, sous forme d'une petite zone autour du point (comme toute requête WMS).
 Un run complet du HRDPS représente ~1 700 petites requêtes ; le programme ne réinterroge GeoMet que lorsqu'un nouveau
 run existe (la première fois, le téléchargement des grilles de la carte prend ~3–4 min en arrière-plan ; la barre et
 les graphiques sont disponibles avant). Le radar n'est chargé que lorsque vous ouvrez la couche radar (≈ 60 petites

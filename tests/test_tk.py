@@ -73,3 +73,11 @@ def test_drag_pans_the_map(win):
     assert (v.clon, v.clat) != (lon0, lat0)
     win.on_release = None
     win.drag = None
+
+
+def test_clicking_a_link_opens_it(win, monkeypatch):
+    from hrdps_weather import links
+    opened = []
+    monkeypatch.setattr(links, "open_url", lambda u: opened.append(u))
+    win.on_press(ev(win, *centre(win, "link")))
+    assert opened and opened[0].startswith("https://meteo.gc.ca/fr/location/")

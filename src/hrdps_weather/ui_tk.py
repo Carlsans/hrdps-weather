@@ -17,6 +17,7 @@ from . import hrdps
 from . import view as wv
 from .tiles import TileCache
 from . import update
+from . import climate, links
 
 FRAME_MS = 66            # ~15 fps target; the next frame is scheduled after the render
 
@@ -46,6 +47,8 @@ class WeatherWindow:
             self.updater = update.Updater()
             self.updater.start()
         self._msg = None
+        self.normals = climate.Loader(network=not os.environ.get("HRDPS_NO_REFRESH"))
+        self.normals.start()
         self.tiles = TileCache(hrdps.CACHE, network=not os.environ.get("HRDPS_NO_REFRESH"))
         self._photo = None
         self._dirty = True
@@ -76,6 +79,7 @@ class WeatherWindow:
         if d is not None:
             self.view = wv.View(d, self.tiles, prefetch_radar=self.tiles.network)
             self.view.updater = self.updater
+            self.view.climate = self.normals
             self.view.status = "Cartes en téléchargement…"
 
     def _start_maps(self):
@@ -162,6 +166,8 @@ class WeatherWindow:
             v.speed = {2.0: 4.0, 4.0: 8.0, 8.0: 1.0, 1.0: 2.0}.get(v.speed, 2.0)
         elif tag == "update":
             self.updater.install()
+        elif tag == "link":
+            links.open_url(arg)
         elif tag == "zoom_in":
             v.zoom_by(+0.5)
         elif tag == "zoom_out":

@@ -16,6 +16,7 @@ from pathlib import Path
 from . import hrdps
 from .tiles import TileCache
 from . import update
+from . import climate, links
 
 PIDFILE = Path(tempfile.gettempdir()) / "waybar-weather-popup.pid"
 
@@ -39,6 +40,8 @@ def run_gtk():
 
     updater = update.Updater()
     updater.start()                                  # no-op unless updates are enabled (off by default)
+    normals = climate.Loader(network=not os.environ.get("HRDPS_NO_REFRESH"))
+    normals.start()
     tiles = TileCache(hrdps.CACHE, network=not os.environ.get("HRDPS_NO_REFRESH"))
 
     def make_view():
@@ -47,6 +50,7 @@ def run_gtk():
             return None
         v = wv.View(d, tiles, prefetch_radar=tiles.network)
         v.updater = updater
+        v.climate = normals
         v.status = "Cartes en téléchargement…"
         return v
 
@@ -112,6 +116,8 @@ def run_gtk():
                 v.speed = {2.0: 4.0, 4.0: 8.0, 8.0: 1.0, 1.0: 2.0}.get(v.speed, 2.0)
             elif tag == "update":
                 updater.install()
+            elif tag == "link":
+                links.open_url(arg)
             elif tag == "zoom_in":
                 v.zoom_by(+0.5)
             elif tag == "zoom_out":
