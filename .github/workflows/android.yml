@@ -81,5 +81,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release view "${{ github.ref_name }}" >/dev/null 2>&1 || gh release create "${{ github.ref_name }}" --title "${{ github.ref_name }}" --notes ""
-          gh release upload "${{ github.ref_name }}" dist/hrdps-weather-android.apk dist/SHA256SUMS-android.txt $(ls dist/SHA256SUMS-android.txt.sig 2>/dev/null) --clobber
+          # The Windows and Linux builds edit the same release at the same time: an upload can be refused (HTTP 422)
+          # although it is fine a moment later. Retry instead of failing the build and skipping the notes.
+          ok=0
+          for attempt in 1 2 3 4; do
+            if gh release upload "${{ github.ref_name }}" dist/hrdps-weather-android.apk dist/SHA256SUMS-android.txt $(ls dist/SHA256SUMS-android.txt.sig 2>/dev/null) --clobber; then ok=1; break; fi
+            echo "upload failed (attempt $attempt), retrying"; sleep $((attempt * 6))
+          done
+          [ "$ok" = 1 ] || exit 1
           python packaging/release-notes.py "${{ github.ref_name }}" android dist/SHA256SUMS-android.txt

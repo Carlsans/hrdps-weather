@@ -106,5 +106,10 @@ jobs:
       - name: Attach to the release and merge the notes
         run: |
           gh release view "${{ github.ref_name }}" >/dev/null 2>&1 || gh release create "${{ github.ref_name }}" --title "${{ github.ref_name }}" --notes ""
-          gh release upload "${{ github.ref_name }}" out/hrdps-weather-linux-x86_64 out/hrdps-weather-linux-aarch64 out/SHA256SUMS-linux.txt out/SHA256SUMS-linux.txt.sig --clobber
+          ok=0
+          for attempt in 1 2 3 4; do      # concurrent edits of the same release can be refused (HTTP 422): retry
+            if gh release upload "${{ github.ref_name }}" out/hrdps-weather-linux-x86_64 out/hrdps-weather-linux-aarch64 out/SHA256SUMS-linux.txt out/SHA256SUMS-linux.txt.sig --clobber; then ok=1; break; fi
+            echo "upload failed (attempt $attempt), retrying"; sleep $((attempt * 6))
+          done
+          [ "$ok" = 1 ] || exit 1
           python packaging/release-notes.py "${{ github.ref_name }}" linux out/SHA256SUMS-linux.txt

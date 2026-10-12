@@ -128,5 +128,11 @@ jobs:
           $tag = "${{ github.ref_name }}"
           gh release view $tag 2>$null
           if ($LASTEXITCODE -ne 0) { gh release create $tag --title $tag --notes "" }
-          gh release upload $tag dist/hrdps-weather-setup-x86_64.exe dist/hrdps-weather-windows-x86_64.zip dist/SHA256SUMS.txt dist/SHA256SUMS.txt.sig --clobber
+          $ok = $false                         # concurrent edits of the same release can be refused (HTTP 422): retry
+          foreach ($attempt in 1..4) {
+            gh release upload $tag dist/hrdps-weather-setup-x86_64.exe dist/hrdps-weather-windows-x86_64.zip dist/SHA256SUMS.txt dist/SHA256SUMS.txt.sig --clobber
+            if ($LASTEXITCODE -eq 0) { $ok = $true; break }
+            Write-Host "upload failed (attempt $attempt), retrying"; Start-Sleep -Seconds (6 * $attempt)
+          }
+          if (-not $ok) { throw "could not attach the files to the release" }
           python packaging/release-notes.py $tag windows dist/SHA256SUMS.txt
