@@ -17,7 +17,7 @@ from . import hrdps
 from . import view as wv
 from .tiles import TileCache
 from . import update
-from . import climate, links
+from . import climate, links, tides
 
 FRAME_MS = 66            # ~15 fps target; the next frame is scheduled after the render
 
@@ -49,6 +49,7 @@ class WeatherWindow:
         self._msg = None
         self.normals = climate.Loader(network=not os.environ.get("HRDPS_NO_REFRESH"))
         self.normals.start()
+        self.tide_loader = tides.Loader(network=not os.environ.get("HRDPS_NO_REFRESH"))
         self.tiles = TileCache(hrdps.CACHE, network=not os.environ.get("HRDPS_NO_REFRESH"))
         self._photo = None
         self._dirty = True
@@ -80,6 +81,7 @@ class WeatherWindow:
             self.view = wv.View(d, self.tiles, prefetch_radar=self.tiles.network)
             self.view.updater = self.updater
             self.view.climate = self.normals
+            self.view.tides = self.tide_loader
             self.view.status = "Cartes en téléchargement…"
 
     def _start_maps(self):
@@ -234,7 +236,7 @@ class WeatherWindow:
             v.speed = min(max(v.speed * (2 if k == "Up" else 0.5), 1.0), 8.0)
         elif k == "Home":
             v.t = float(v.i0)
-        elif k in ("1", "2", "3", "4", "5"):
+        elif k in ("1", "2", "3", "4", "5", "6"):
             v.layer = wv.LAYERS[int(k) - 1][0]
         elif k in ("u", "U"):
             self.updater.install()

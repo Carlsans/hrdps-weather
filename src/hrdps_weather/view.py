@@ -6,12 +6,12 @@ import math
 import os
 import sys
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta
 import time
 
 import cairo
 
-from . import astro, climate, hrdps, links
+from . import astro, climate, hrdps, links, tides
 
 # Text: Pango (colour emoji, nice shaping) when PyGObject is installed (typical on Linux),
 # otherwise cairo's built-in "toy" text API (Windows: pip-installed pycairo only).
@@ -44,9 +44,11 @@ CHART_RECT = (612, 110, 770, 680)
 MP = 200                           # overlay raster size (square, mercator space)
 COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSO", "SO", "OSO", "O", "ONO", "NO", "NNO"]
 
-LAYERS = [("rt", "💧 Précip."), ("tt", "🌡 Temp."), ("ws", "💨 Vent"), ("nt", "☁ Nuages"), ("radar", "📡 Radar")]
+LAYERS = [("rt", "💧 Précip."), ("tt", "🌡 Temp."), ("ws", "💨 Vent"), ("nt", "☁ Nuages"), ("radar", "📡 Radar"),
+          ("tides", "🌊 Marées")]
 LAYER_TITLE = {"rt": "Précipitations (prévision HRDPS)", "tt": "Température à 2 m (HRDPS)", "ws": "Vent à 10 m (HRDPS)",
-               "nt": "Couverture nuageuse (HRDPS)", "radar": "Radar météo (observé, ECCC)"}
+               "nt": "Couverture nuageuse (HRDPS)", "radar": "Radar météo (observé, ECCC)",
+               "tides": "Marées (Service hydrographique du Canada)"}
 DEFAULT_Z, MIN_Z, MAX_Z = 7.55, 5.5, 11.0        # tile-zoom of the camera (7.55 ≈ the 3-tile block of earlier versions)
 OV = 160                                         # model overlay raster size (square), scaled up with bilinear filtering
 # Official radar palette (GeoMet legend, 0.1 → 200 mm/h), evenly spaced on the legend.
@@ -210,6 +212,7 @@ class View:
         self.prefetch_radar = prefetch_radar                       # warm the radar in the background (UI only)
         self.updater = None                                        # update.Updater: shows an update banner
         self.climate = None                                        # climate.Loader: normals for the bottom strip
+        self.tides = None                                          # tides.Loader: the "Marées" tab
         self.i0, self.i1 = data.now_index(), data.n - 1
         self.t = float(self.i0)
         self.layer, self.playing, self.speed = "rt", True, 2.0       # speed: model hours per second
@@ -220,7 +223,7 @@ class View:
         self.radar = None                                          # radar.RadarLoader, created on first use
         self.rt = 0.0                                              # radar frame cursor (float index)
         self.reset_camera()
-        self._seen = (-1, -1, False)
+        self._seen = (-1, -1, False, -1)
         self._pan0 = None
 
     # -- camera ----------------------------------------------------------------
@@ -364,7 +367,7 @@ class View:
     def poll(self):
         """True when something that arrived in the background (tiles, radar) should trigger a redraw."""
         seen = (self.tiles.version if self.tiles else -1, self.radar.version if self.radar else -1,
-                bool(self.climate and self.climate.normals))
+                bool(self.climate and self.climate.normals), self.tides.version if self.tides else -1)
         changed = seen != self._seen
         self._seen = seen
         return changed
@@ -439,6 +442,16 @@ class View:
     def draw_map(self, cr):
         import numpy as np
         x, y, w, h = MAP_RECT
+        if self.layer == "tides":                                  # a panel instead of a map
+            cr.save(); rrect(cr, x, y, w, h, 12); cr.clip()
+            cr.set_source_rgb(*PANEL); cr.paint()
+            self._draw_tides(cr, x, y, w, h)
+            cr.restore()
+            cr.save(); rrect(cr, x, y, w, 30, 12); cr.clip()
+            cr.set_source_rgba(*SURFACE, 0.9); cr.paint(); cr.restore()
+            text(cr, LAYER_TITLE["tides"], x + 12, y + 6, 14, TEXT, True)
+            text(cr, self._time_label(), x + w - 12, y + 6, 14, SUBTLE, True, "r")
+            return
         self.hits.append(((x, y, w, h), "map", None))
         cr.save(); rrect(cr, x, y, w, h, 12); cr.clip()
         cr.set_source_rgb(*PANEL); cr.paint()
@@ -477,6 +490,145 @@ class View:
         self.draw_legend(cr, x + 12, y + h - 32, w - 24)
         credit = "© contributeurs OpenStreetMap · " + ("radar ECCC" if lay == "radar" else "données HRDPS © ECCC")
         text(cr, credit, x + 12, y + h - 15, 9, SUBTLE, False, "l", alpha=0.8)
+
+    # tides -----------------------------------------------------------------------
+    def _draw_tides(self, cr, x, y, w, h):
+        tl = self.tides
+        if tl is None:
+            text(cr, "Marées non chargées", x + w / 2, y + h / 2, 16, SUBTLE, False, "c", "m")
+            return
+        tl.ensure()
+        td = tl.data
+        if td is None:
+            msg = {"none": f"Aucune station de marées à moins de {tides.MAX_KM:.0f} km de {hrdps.LOCATION}.",
+                   "error": "Marées indisponibles (réseau ?)"}.get(tl.state, "Chargement des marées…")
+            text(cr, msg, x + w / 2, y + h / 2, 16, SUBTLE, False, "c", "m")
+            return
+        tz = hrdps.TZ
+        loc = lambda t: datetime.fromtimestamp(t, tz)
+        fm = lambda v, n=2: f"{v:.{n}f}".replace(".", ",")
+        now = time.time()
+        i = min(int(math.floor(self.t)), self.i1)
+        j = min(i + 1, self.i1)
+        cursor = self.d.utc[i].timestamp() + (self.t - i) * (self.d.utc[j].timestamp() - self.d.utc[i].timestamp())
+        st = td.station
+        kind = {"PERMANENT": "station permanente", "VIRTUAL": "station virtuelle", "TEMPORARY": "station temporaire",
+                "DISCONTINUED": "station fermée"}.get(st.get("type", ""), "station")
+        text(cr, f"{st['name']} · {kind} · {st['km']:.0f} km", x + 16, y + 42, 12, SUBTLE)
+
+        # current level, trend, difference with the prediction, water temperature
+        obs, pred = td.latest_observed(now), td.predicted(now)
+        level = obs[1] if obs else pred
+        if level is not None:
+            lw = text(cr, f"{fm(level)} m", x + 16, y + 62, 40, TEXT, True)
+            rate = td.trend(now)
+            col = SKY if (rate or 0) > 0.05 else PEACH if (rate or 0) < -0.05 else SUBTLE
+            arrow = "▲" if (rate or 0) > 0.05 else "▼" if (rate or 0) < -0.05 else "■"
+            text(cr, f"{arrow} {tides.trend_text(rate)}", x + 16 + lw + 14, y + 66, 15, col, True)
+            sub = "mesuré" if obs else "prédit"
+            if obs and pred is not None:
+                sub += f" · écart vs prédit {fm(obs[1] - pred)} m".replace("-", "−") if abs(obs[1] - pred) >= 0.005 else ""
+            temp = td.water_temperature(now)
+            if temp is not None:
+                sub += f" · eau {fm(temp, 1)} °C"
+            text(cr, sub, x + 16 + lw + 14, y + 90, 12, SUBTLE)
+        if abs(cursor - now) > 20 * 60:                                   # the time cursor is elsewhere
+            at = td.predicted(cursor)
+            if at is not None:
+                text(cr, f"{hrdps.fr(loc(cursor), '%a %Hh')} : {fm(at)} m", x + w - 16, y + 42, 13, YELLOW, True, "r")
+
+        # chart
+        cx0, cx1, cy0, ch = x + 46, x + w - 16, y + 150, 214
+        t0 = now - 12 * 3600
+        t1 = max(self.d.utc[self.i1].timestamp(), now + 24 * 3600)
+        X = lambda t: cx0 + (t - t0) / (t1 - t0) * (cx1 - cx0)
+        vals = [v for s in (td.wlp, td.wlo, td.wlf) for t, v in s if t0 <= t <= t1]
+        if not vals:
+            text(cr, "Pas de prédictions pour cette période", x + w / 2, y + 250, 14, SUBTLE, False, "c", "m")
+            return
+        vmin, vmax = min(vals) - 0.3, max(vals) + 0.6
+        Y = lambda v: cy0 + ch - (v - vmin) / (vmax - vmin) * ch
+        cr.set_source_rgb(*SURFACE); rrect(cr, cx0, cy0, cx1 - cx0, ch, 8); cr.fill()
+        cr.save(); rrect(cr, cx0, cy0, cx1 - cx0, ch, 8); cr.clip()
+        step = 1 if vmax - vmin <= 8 else 2
+        for g in range(math.ceil(vmin / step), int(vmax // step) + 1):
+            cr.set_source_rgba(*MUTED, 0.25); cr.set_line_width(0.7)
+            cr.move_to(cx0, Y(g * step)); cr.line_to(cx1, Y(g * step)); cr.stroke()
+        first_hour = int(t0 // 3600) * 3600
+        for hh in range(first_hour, int(t1) + 3600, 3600):                # every 6 local hours
+            lt = loc(hh)
+            if lt.hour % 6 == 0 and t0 <= hh <= t1:
+                cr.set_source_rgba(*MUTED, 0.6 if lt.hour == 0 else 0.25); cr.set_line_width(0.8)
+                if lt.hour == 0:
+                    cr.set_dash([3, 3])
+                cr.move_to(X(hh), cy0); cr.line_to(X(hh), cy0 + ch); cr.stroke(); cr.set_dash([])
+
+        def line(series, color, width=2, dash=None, since=None, until=None, fill=False):
+            pts = [(X(t), Y(v)) for t, v in series if t0 <= t <= t1 and (since is None or t >= since)
+                   and (until is None or t <= until)]
+            if len(pts) < 2:
+                return
+            if fill:
+                cr.move_to(pts[0][0], cy0 + ch)
+                for p in pts:
+                    cr.line_to(*p)
+                cr.line_to(pts[-1][0], cy0 + ch); cr.close_path()
+                cr.set_source_rgba(*color, 0.16); cr.fill()
+            cr.move_to(*pts[0])
+            for p in pts[1:]:
+                cr.line_to(*p)
+            cr.set_source_rgb(*color); cr.set_line_width(width); cr.set_line_join(cairo.LINE_JOIN_ROUND)
+            cr.set_dash(dash or []); cr.stroke(); cr.set_dash([])
+
+        line(td.wlp, BLUE, 2.2, fill=True)
+        line(td.wlf, LAV, 1.6, [5, 4], since=now - 1800)
+        line(td.wlo, GREEN, 2.2, until=now)
+        cr.restore()
+        for t, v, kind_ in td.events:                                     # highs and lows
+            if t0 <= t <= t1:
+                high = kind_ == "H"
+                cr.set_source_rgb(*BG); cr.arc(X(t), Y(v), 4.5, 0, 2 * math.pi); cr.fill()
+                cr.set_source_rgb(*(SKY if high else PEACH)); cr.arc(X(t), Y(v), 3.2, 0, 2 * math.pi); cr.fill()
+                text(cr, f"{fm(v, 1)} · {loc(t):%H:%M}", X(t), Y(v) + (-17 if high else 7), 10, TEXT, True, "c")
+        for g in range(math.ceil(vmin / step), int(vmax // step) + 1):
+            text(cr, f"{g * step}", cx0 - 6, Y(g * step), 10, MUTED, False, "r", "m")
+        for hh in range(first_hour, int(t1) + 3600, 3600):
+            lt = loc(hh)
+            if lt.hour % 6 == 0 and t0 <= hh <= t1:
+                text(cr, f"{lt.hour:02d}h", X(hh), cy0 + ch + 4, 10, MUTED, False, "c")
+                if lt.hour == 0:
+                    text(cr, hrdps.fr(lt, "%a %d"), X(hh) + 3, cy0 + ch + 17, 10, SUBTLE, True)
+        text(cr, "m", cx0 - 6, cy0 - 14, 10, MUTED, False, "r")
+        cr.set_source_rgba(*TEXT, 0.55); cr.set_line_width(1); cr.set_dash([4, 3])
+        cr.move_to(X(now), cy0); cr.line_to(X(now), cy0 + ch); cr.stroke(); cr.set_dash([])
+        if t0 <= cursor <= t1:
+            cr.set_source_rgba(*YELLOW, 0.9); cr.set_line_width(1.4)
+            cr.move_to(X(cursor), cy0); cr.line_to(X(cursor), cy0 + ch); cr.stroke()
+
+        # next highs and lows
+        text(cr, "PROCHAINES MARÉES", x + 16, y + 392, 11, BLUE, True)
+        nxt = td.next_events(now, 6)
+        for k, (t, v, kind_) in enumerate(nxt):
+            ex, ey = x + 16 + (k % 2) * 270, y + 412 + (k // 2) * 34
+            high = kind_ == "H"
+            left = max(int((t - now) // 60), 0)
+            day = "" if loc(t).date() == loc(now).date() else f" {hrdps.fr(loc(t), '%a')}"
+            text(cr, "▲" if high else "▼", ex, ey + 1, 14, SKY if high else PEACH, True)
+            text(cr, f"{'Pleine mer' if high else 'Basse mer'}  {loc(t):%H:%M}{day}", ex + 20, ey, 13, TEXT, True)
+            text(cr, f"{fm(v)} m · dans {left // 60} h {left % 60:02d}" if left >= 60 else f"{fm(v)} m · dans {left} min",
+                 ex + 20, ey + 16, 11, SUBTLE)
+        if not nxt:
+            text(cr, "Aucune marée prédite pour la suite", x + 16, y + 414, 12, SUBTLE)
+
+        # legend + source
+        ly = y + h - 30
+        for k, (lab, col, dash) in enumerate((("prédit", BLUE, None), ("observé", GREEN, None), ("prévu (avec surcote)", LAV, [5, 4]))):
+            lx = x + 16 + k * 90
+            cr.set_source_rgb(*col); cr.set_line_width(2); cr.set_dash(dash or [])
+            cr.move_to(lx, ly + 7); cr.line_to(lx + 16, ly + 7); cr.stroke(); cr.set_dash([])
+            text(cr, lab, lx + 21, ly, 10, SUBTLE)
+        text(cr, "Hauteurs en m (zéro des cartes) · Service hydrographique du Canada, Pêches et Océans Canada",
+             x + 16, y + h - 14, 9, MUTED)
 
     def _time_label(self):
         if self.layer == "radar":
@@ -663,7 +815,7 @@ class View:
         for key, label in LAYERS:
             on = key == self.layer
             cr.set_source_rgb(*(BLUE if on else SURFACE)); rrect(cr, bx, by, bw, 32, 9); cr.fill()
-            text(cr, label, bx + bw / 2, by + 16, 14, PANEL if on else SUBTLE, on, "c", "m")
+            text(cr, label, bx + bw / 2, by + 16, 13, PANEL if on else SUBTLE, on, "c", "m")
             self.hits.append(((bx, by, bw, 32), "layer", key)); bx += bw + gap
         # play/pause + speed + slider
         ty = by + 50

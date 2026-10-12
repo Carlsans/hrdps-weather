@@ -28,6 +28,7 @@ longitude = -71.2080
 location  = "Québec"            # label shown in the interface
 timezone  = "America/Toronto"   # IANA name, used to show local hours
 update    = "off"               # off | notify | auto : mises à jour depuis GitHub (désactivées par défaut)
+# tide_station = "03248"        # facultatif : code d'une station de marées (sinon la plus proche est choisie)
 """
 
 

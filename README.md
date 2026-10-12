@@ -155,9 +155,14 @@ prévisions d'Environnement Canada pour votre position (conditions, prévisions,
 **Carte** — molette ou boutons **+ / −** : zoom (autour du curseur) ; glisser : déplacer ; double-clic : zoom avant ;
 bouton ◎ ou touche `0` : recentrer. Couches : précipitations, température, vent, nuages (prévision HRDPS) et
 **radar** (observé : les 3 dernières heures, une image toutes les 6 min, pluie et neige ; il se recharge pour la zone
-affichée quand vous déplacez la carte).
+affichée quand vous déplacez la carte). L'onglet **🌊 Marées** remplace la carte par un panneau : niveau d'eau actuel
+et tendance (monte/baisse), courbe prédite, niveaux observés et prévision tenant compte des surcotes, pleines et basses
+mers annotées, prochaines marées et température de l'eau. Les données viennent du **Service hydrographique du Canada**
+(Pêches et Océans Canada) pour la station la plus proche — de préférence une station permanente avec observations ;
+le curseur de temps se promène sur la courbe. Sans station à moins de 120 km, l'onglet l'indique. Pour imposer une
+station, ajoutez `tide_station = "03248"` (son code) dans `config.toml`.
 
-**Temps** — espace : lecture/pause · ←/→ : ±1 h · ↑/↓ : vitesse · 1–5 : couche · +/− : zoom · Home : maintenant ·
+**Temps** — espace : lecture/pause · ←/→ : ±1 h · ↑/↓ : vitesse · 1–6 : couche · +/− : zoom · Home : maintenant ·
 Échap : fermer. Glissez le curseur ou survolez un graphique (en pause) pour explorer le temps. En mode radar, le
 curseur parcourt les images du radar ; les graphiques restent sur l'heure choisie.
 
@@ -168,6 +173,7 @@ Aucun compte, aucune clé d'API, aucune télémétrie. Seuls ces hôtes sont con
 | Hôte | Pourquoi |
 | --- | --- |
 | `geo.weather.gc.ca` (MSC GeoMet) | séries horaires au point et grilles de la carte (HRDPS), images du radar |
+| `api-iwls.dfo-mpo.gc.ca` | marées (Service hydrographique du Canada) : liste des stations (gardée un mois), puis prédictions et niveaux de la station choisie, rafraîchis toutes les 20 min seulement quand l'onglet Marées est ouvert |
 | `api.weather.gc.ca` | normales climatiques de la station la plus proche (une fois, puis gardées 2 mois dans le cache) |
 | `tile.openstreetmap.org` | tuiles du fond de carte, **à la demande** selon la zone et le zoom affichés (mises en cache sur le disque) |
 | `carlsans.github.io` | application web seulement : ses propres fichiers (GitHub Pages) |
