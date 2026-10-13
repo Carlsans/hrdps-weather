@@ -16,6 +16,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -40,6 +41,11 @@ class WeatherWidgetLarge : AppWidgetProvider() {
 object Widgets {
     private const val PERIODIC = "widget-periodic"
     private const val NOW = "widget-now"
+    private const val HOUR = "widget-hour"
+    private const val RUN = "widget-run"
+    const val BOUNDARY = "widget-boundary"                      // tag of the two one-off jobs below
+    private const val RUN_STEP_S = 6 * 3600L                    // HRDPS runs every 6 hours…
+    private const val RUN_LAG_S = 3 * 3600L + 11 * 60L          // …and is complete on GeoMet about 3 h 10 min later
     private val HM = DateTimeFormatter.ofPattern("HH'h'mm")
     private const val WET = 0xFFFAB387.toInt()
     private const val DRY = 0xFFA6ADC8.toInt()
@@ -64,10 +70,30 @@ object Widgets {
         if (smallIds(c).isEmpty() && largeIds(c).isEmpty()) WorkManager.getInstance(c).cancelUniqueWork(PERIODIC)
     }
 
-    /** Every 30 min while a widget exists (Android's minimum for periodic work is 15 min). */
+    /** Every 15 min while a widget exists (Android's minimum for periodic work). UPDATE replaces the 30-minute job
+     *  that earlier versions left scheduled. */
     fun schedule(c: Context) {
-        val req = PeriodicWorkRequestBuilder<WidgetWorker>(30, TimeUnit.MINUTES).setConstraints(network).build()
-        WorkManager.getInstance(c).enqueueUniquePeriodicWork(PERIODIC, ExistingPeriodicWorkPolicy.KEEP, req)
+        val req = PeriodicWorkRequestBuilder<WidgetWorker>(15, TimeUnit.MINUTES).setConstraints(network).build()
+        WorkManager.getInstance(c).enqueueUniquePeriodicWork(PERIODIC, ExistingPeriodicWorkPolicy.UPDATE, req)
+    }
+
+    /** The data only changes at two moments: when the hour turns, and when a new model run is published. Aim one-off
+     *  jobs at both, so the widget is current within seconds instead of waiting for the next 15-minute slot. They do
+     *  not repeat: every regular refresh arms them again, replacing any pending one (and they never re-arm
+     *  themselves, which would cancel the running job). */
+    fun armBoundaries(c: Context, ref: Instant, now: Instant) {
+        if (smallIds(c).isEmpty() && largeIds(c).isEmpty()) return
+        val wm = WorkManager.getInstance(c)
+        fun at(name: String, delayMs: Long) {
+            val req = OneTimeWorkRequestBuilder<WidgetWorker>()
+                .setInitialDelay(delayMs.coerceAtLeast(5_000L), TimeUnit.MILLISECONDS)
+                .setConstraints(network).addTag(BOUNDARY).build()
+            wm.enqueueUniqueWork(name, ExistingWorkPolicy.REPLACE, req)
+        }
+        val nextHour = (now.epochSecond / 3600 + 1) * 3600
+        at(HOUR, (nextHour + 20 - now.epochSecond) * 1000)                       // 20 s past the hour
+        val expected = ref.plusSeconds(RUN_STEP_S + RUN_LAG_S)                   // next run, expected to be complete
+        if (expected.isAfter(now)) at(RUN, Duration.between(now, expected).toMillis())
     }
 
     fun refreshNow(c: Context) {
@@ -150,10 +176,12 @@ class WidgetWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         val detailed = Widgets.largeIds(c).isNotEmpty()                 // only download the extras when they are shown
         val ref = GeoMet.latestRef() ?: return Result.retry()
         val now = Instant.now()
+        if (Widgets.BOUNDARY !in tags) Widgets.armBoundaries(c, ref, now)
         val hourKey = GeoMet.iso(Instant.ofEpochSecond(now.epochSecond / 3600 * 3600))
         val old = Prefs.snapshot(c)
         if (old != null && old.ref == GeoMet.iso(ref) && old.hour == hourKey && old.place == place.location
             && (old.detailed || !detailed)) {
+            Prefs.setSnapshot(c, old.copy(updated = System.currentTimeMillis()))   // checked just now: still current
             Widgets.render(c)                                           // same run, same hour: nothing new to fetch
             return Result.success()
         }

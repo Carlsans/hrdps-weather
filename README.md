@@ -77,9 +77,12 @@ ensemble :
   le bouton **⟳ Recharger l'application** en bas de la page remplace la copie gardée pour le hors ligne **sans** toucher
   à vos données (inutile d'effacer les données d'Android). Chaque nouvelle APK fait aussi ce ménage à son premier
   lancement.
-- Les widgets se rafraîchissent environ toutes les 30 minutes en arrière-plan, quand le réseau est disponible, et
-  seulement si le run ou l'heure a changé : ~30 petites requêtes GeoMet par heure avec le widget 3×2, ~170 avec le
-  4×3 (valeurs au point heure par heure sur 12 h), soit quelques Mo par jour.
+- Les widgets vérifient environ toutes les 15 minutes en arrière-plan (le minimum d'Android), quand le réseau est
+  disponible, et en plus **20 secondes après le début de chaque heure** et à l'heure prévue de publication du
+  prochain run du modèle (~3 h 10 après son départ). Ils ne téléchargent que si le run ou l'heure a changé ; la
+  ligne « màj » indique la dernière vérification réussie. Android peut retarder ces tâches en économie d'énergie : ~30 petites requêtes GeoMet par heure avec le widget 3×2, ~170 avec le
+  4×3 (valeurs au point heure par heure sur 12 h), soit quelques Mo par jour (la vérification de 15 minutes ne coûte
+  qu'une petite requête).
 - Permissions : Internet ; la position seulement si vous touchez *Utiliser ma position*.
 - L'APK est signé (certificat SHA-256 `6a:cf:23:46:f4:8b:a0:d3:cc:74:9a:0b:d5:14:dd:9b:01:41:b7:d0:8b:68:0b:41:54:ea:db:52:72:6a:6f:6a`)
   et son empreinte est publiée avec la release (`SHA256SUMS-android.txt`, signé Ed25519 comme les autres).

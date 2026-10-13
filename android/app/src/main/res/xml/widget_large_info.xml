@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Refreshed by WorkManager every 30 min (updatePeriodMillis is only a fallback). -->
+<!-- Refreshed by WorkManager every 15 min, plus right when the hour turns and when a new model run is due
+     (updatePeriodMillis is only a fallback). -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/widget_large_description"
     android:initialLayout="@layout/widget_large"
