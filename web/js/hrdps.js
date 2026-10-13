@@ -329,7 +329,10 @@ export class Data {
     this.slp = fill(s.slp.map((v) => (v !== null ? v / 100 : null)));          // hPa
     this.nt = c("nt"); this.uv = f("uv", 0); this.pbl = c("pbl"); this.cape = f("cape", 0);
     this.sd = s.sd.map((v) => (v !== null ? v * 100 : 0));                     // cm
-    this.pop = f("pop", 0); this.snowlvl = f("snowlvl"); this.tsprob = f("tsprob", 0);
+    // GeoMet's Precip-Prob layer returns nothing for some hours, typically the saturated ones (neighbours at 99 % while
+    // it is raining): a gap to bridge, not a probability of 0 (the line used to plunge to 0 %).
+    this.pop = c("pop").map((v) => (v !== null ? v : 0));
+    this.snowlvl = f("snowlvl"); this.tsprob = f("tsprob", 0);
     this.fogvis = f("fogvis");
     this.rate = s.rt.map((v) => (v !== null ? v * 3600 : 0));                  // mm/h instantaneous
     const diff = (k) => {                                                      // hourly amount from cumulative

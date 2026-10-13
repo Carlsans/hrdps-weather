@@ -140,3 +140,18 @@ def test_lag_median_from_state(tmp_path, monkeypatch):
     hrdps._save_state(lags=[10000.0, 11000.0, 12000.0])
     monkeypatch.setattr(hrdps, "_lag_cache", (0.0, hrdps.DEFAULT_LAG))
     assert hrdps.run_lag() == 11000.0
+
+
+def test_missing_precipitation_probability_is_bridged_not_zero(data):
+    """Regression: GeoMet leaves Precip-Prob empty for some hours (here 3 hours between 99 % neighbours while it rains);
+    the line used to drop to 0 % there."""
+    import copy
+    raw = copy.deepcopy(data.raw)
+    raw["series"]["pop"] = [None, 97, 99, 99, None, None, None, 99, 98] + [50] * (len(raw["series"]["pop"]) - 9)
+    d = hrdps.Data(raw)
+    assert d.pop[4:7] == [99, 99, 99]                       # the gap between two 99 % values stays at 99 %
+    assert d.pop[0] == 97                                   # the first hour (the layer starts one hour late): nearest value
+    raw["series"]["pop"] = [None] * len(raw["series"]["pop"])
+    assert set(hrdps.Data(raw).pop) == {0}                  # nothing at all: 0, never None
+    raw["series"]["pop"] = [10, None, None, 40] + [40] * (len(raw["series"]["pop"]) - 4)
+    assert hrdps.Data(raw).pop[1:3] == pytest.approx([20, 30])    # a ramp is interpolated linearly

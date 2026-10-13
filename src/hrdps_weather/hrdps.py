@@ -409,7 +409,10 @@ class Data:
         self.slp  = _fill([v / 100 if v is not None else None for v in s["slp"]])   # hPa
         self.nt, self.uv, self.pbl, self.cape = c("nt"), f("uv", 0), c("pbl"), f("cape", 0)
         self.sd   = [v * 100 if v is not None else 0 for v in s["sd"]]         # cm
-        self.pop, self.snowlvl, self.tsprob = f("pop", 0), f("snowlvl"), f("tsprob", 0)
+        # GeoMet's Precip-Prob layer returns *nothing* for some hours, typically the saturated ones (neighbours at 99 %
+        # while it is raining): that is a gap to bridge, not a probability of 0 (which made the line plunge to 0 %).
+        self.pop = [v if v is not None else 0 for v in c("pop")]
+        self.snowlvl, self.tsprob = f("snowlvl"), f("tsprob", 0)
         self.fogvis = f("fogvis")
         self.rate = [v * 3600 if v is not None else 0 for v in s["rt"]]        # mm/h instantaneous
         def diff(k):                                                           # hourly amount from cumulative
