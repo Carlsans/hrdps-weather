@@ -38,7 +38,7 @@ object GeoMet {
 
     fun iso(t: Instant): String = ISO.format(t)
 
-    private fun get(url: String, timeoutMs: Int = 30000, tries: Int = 2): String? {
+    internal fun get(url: String, timeoutMs: Int = 30000, tries: Int = 2): String? {
         repeat(tries) {
             try {
                 val c = URL(url).openConnection() as HttpURLConnection
@@ -84,7 +84,7 @@ object GeoMet {
         }
     }
 
-    private fun feature(layer: String, t: Instant, lat: Double, lon: Double): Cell {
+    internal fun feature(layer: String, t: Instant, lat: Double, lon: Double): Cell {
         val d = 0.01
         val url = "$GEOMET?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetFeatureInfo&LAYERS=$layer&QUERY_LAYERS=$layer" +
             "&CRS=EPSG:4326&BBOX=${lat - d},${lon - d},${lat + d},${lon + d}&WIDTH=101&HEIGHT=101&I=50&J=50" +

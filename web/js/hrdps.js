@@ -8,7 +8,7 @@ export const GEOMET = "https://geo.weather.gc.ca/geomet";
 export const HOURS = 48;
 export const CHECK_EVERY = 600;                 // s between "is there a new run?" checks
 export const REGION_ZOOM = 8, WIDE_ZOOM = 6, MAP_TILES = 3;
-export const WIDE_CELLS = 120;
+export const WIDE_CELLS = 80;                         // the wide grid is asked this small (the region one is already at native size)
 export const WORKERS = 6;                       // browsers allow 6 connections per HTTP/1.1 host
 
 const C = "HRDPS.CONTINENTAL_";

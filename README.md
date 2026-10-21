@@ -83,6 +83,14 @@ ensemble :
   ligne « màj » indique la dernière vérification réussie. Android peut retarder ces tâches en économie d'énergie : ~30 petites requêtes GeoMet par heure avec le widget 3×2, ~170 avec le
   4×3 (valeurs au point heure par heure sur 12 h), soit quelques Mo par jour (la vérification de 15 minutes ne coûte
   qu'une petite requête).
+- **Téléchargement en arrière-plan** (1.8) : GeoMet répond ~4 à 10 requêtes par seconde quelle que soit la
+  parallélisation, et un run complet en demande ~1 900 (1 372 valeurs ponctuelles + 490 grilles de carte) : des
+  minutes, que la page web ne peut pas faire en étant tuée par Android. L'application télécharge donc elle-même le
+  run, par morceaux repris là où ils s'arrêtent, au démarrage puis à chaque nouveau run (vérification toutes les
+  30 minutes, et à l'heure prévue de publication). Les valeurs se téléchargent sur tout réseau (~1,5 Mo) ; les
+  **cartes** (~25 Mo par run) seulement sur un réseau **non limité** (Wi-Fi) : sur données mobiles la page les
+  télécharge elle-même, à l'ouverture. À l'ouverture, la page reprend ce qui est déjà là au lieu de tout retélécharger
+  et affiche l'avancement du téléchargement en cours (qui continue si vous fermez l'application).
 - Permissions : Internet ; la position seulement si vous touchez *Utiliser ma position*.
 - L'APK est signé (certificat SHA-256 `6a:cf:23:46:f4:8b:a0:d3:cc:74:9a:0b:d5:14:dd:9b:01:41:b7:d0:8b:68:0b:41:54:ea:db:52:72:6a:6f:6a`)
   et son empreinte est publiée avec la release (`SHA256SUMS-android.txt`, signé Ed25519 comme les autres).

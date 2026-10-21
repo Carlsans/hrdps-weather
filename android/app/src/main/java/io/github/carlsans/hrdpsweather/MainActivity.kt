@@ -14,6 +14,7 @@ import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
@@ -26,6 +27,9 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updatePadding
+import java.io.ByteArrayInputStream
+import java.io.File
+import java.io.FileInputStream
 
 /**
  * The app itself is the web app (web/ in the repository, served by GitHub Pages) shown full screen in a WebView:
@@ -99,11 +103,13 @@ class MainActivity : ComponentActivity() {
         @JavascriptInterface
         fun setPlace(json: String) {
             val p = Place.fromJson(json) ?: return
-            if (Prefs.setPlace(applicationContext, p)) {
+            val changed = Prefs.setPlace(applicationContext, p)
+            if (changed) {
                 Prefs.setSnapshot(applicationContext, null)
                 Widgets.render(applicationContext)
             }
             Widgets.refreshNow(applicationContext)
+            Prefetch.now(applicationContext)                    // the whole run, downloaded in the background
         }
 
         /** True when the launcher can add the widget from the app (Android 8+, most launchers). */
@@ -128,6 +134,20 @@ class MainActivity : ComponentActivity() {
             if (url.host == APP_HOST && url.path.orEmpty().startsWith(APP_PATH)) return false
             runCatching { startActivity(Intent(Intent.ACTION_VIEW, url)) }      // links (source code…) open outside
             return true
+        }
+
+        /** The files Prefetch.kt downloaded, as seen by the page at https://native.hrdps.invalid/ (state.json, f/<file>). */
+        override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+            if (request.url.host != Prefetch.NATIVE_HOST) return null
+            val rel = request.url.path.orEmpty().trimStart('/')
+            val file = if (rel == "state.json") Prefetch.stateFile(applicationContext)
+                else File(Prefetch.readyDir(applicationContext), rel.removePrefix("f/")).takeIf { rel.startsWith("f/") }
+            val ok = file != null && file.isFile && file.canonicalPath.startsWith(Prefetch.readyDir(applicationContext).canonicalPath).let {
+                it || file == Prefetch.stateFile(applicationContext) }
+            val type = if (rel.endsWith(".bin")) "application/octet-stream" else "application/json"
+            val headers = mapOf("Access-Control-Allow-Origin" to "*", "Cache-Control" to "no-store")
+            return if (ok) WebResourceResponse(type, null, 200, "OK", headers, FileInputStream(file))
+            else WebResourceResponse("text/plain", "utf-8", 404, "Not Found", headers, ByteArrayInputStream(ByteArray(0)))
         }
 
         override fun onPageFinished(view: WebView, url: String) {

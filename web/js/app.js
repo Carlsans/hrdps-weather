@@ -4,6 +4,7 @@ import * as astro from "./astro.js";
 import * as climate from "./climate.js";
 import * as config from "./config.js";
 import * as H from "./hrdps.js";
+import { sleep } from "./net.js";
 import * as store from "./store.js";
 import * as tides from "./tides.js";
 import { TileCache } from "./tiles.js";
@@ -69,6 +70,71 @@ function setMaps(maps) {
   app.dirty = true;
 }
 
+// ── Android: the app downloads the run in the background (Prefetch.kt) and hands it over here ─────────────
+const NATIVE = "https://native.hrdps.invalid/";
+const inAndroidApp = /HrdpsWeatherAndroid/.test(navigator.userAgent);
+const nativeJson = async (path) => { const r = await fetch(NATIVE + path, { cache: "no-store" }); if (!r.ok) throw new Error(path); return r.json(); };
+
+/** Take over what the Android app has already downloaded for this place: the series, then the maps of the same run.
+ *  Returns the native state (with its download progress) or null when there is nothing (not Android, no download yet). */
+async function adoptNative() {
+  if (!inAndroidApp || !app.cfg) return null;
+  const cfg = app.cfg;
+  try {
+    const st = await nativeJson("state.json");
+    if (Math.abs(st.lat - cfg.latitude) > 1e-4 || Math.abs(st.lon - cfg.longitude) > 1e-4) return st.progress ? { progress: null } : null;
+    const newer = (a, b) => !b || Date.parse(a) > Date.parse(b);
+    if (st.series && st.series.ref !== app.state.ref && newer(st.series.ref, app.state.ref)) {
+      const raw = await nativeJson("f/" + st.series.file);
+      if (cfg !== app.cfg) return null;
+      await store.set("series", raw).catch(() => {});
+      await saveState({ ref: raw.ref, checked: Date.now() });
+      setData(raw);
+    }
+    if (st.maps && app.data && st.maps.ref === app.data.raw.ref && st.maps.ref !== app.state.maps_ref) {
+      const h = await nativeJson(`f/${st.maps.dir}/header.json`);
+      const maps = { ref: h.ref, region: null, wide: null };
+      for (const p of ["region", "wide"]) {
+        if (!h[p]) continue;
+        const grids = {};
+        for (const k of h.layers) {
+          const buf = await (await fetch(`${NATIVE}f/${st.maps.dir}/${p}_${k}.bin`, { cache: "no-store" })).arrayBuffer();
+          grids[k] = { T: h[p].T, ny: h[p].ny, nx: h[p].nx, data: new Float32Array(buf) };
+        }
+        maps[p] = { bounds: h[p].bounds, grids };
+      }
+      if (cfg !== app.cfg || !maps.region) return null;
+      await store.set("maps", maps).catch(() => {});
+      await saveState({ maps_ref: maps.ref });
+      setMaps(maps);
+    }
+    return st;
+  } catch (e) {
+    return null;
+  }
+}
+
+/** Wait for the background download of run `refS` while it makes progress (it keeps going when the app is closed),
+ *  taking over its results as they arrive. False: it is not doing it (or stalled), download here as before. */
+async function waitNative(refS, cfg) {
+  const t0 = Date.now();
+  for (;;) {
+    const st = await adoptNative();
+    if (cfg !== app.cfg) return true;
+    const haveSeries = app.state.ref === refS && !!app.data, haveMaps = app.state.maps_ref === refS && !!app.maps;
+    if (haveSeries && haveMaps) return true;
+    const pr = st && st.progress;
+    const live = pr && pr.ref === refS && Date.now() - pr.updated < 90e3;
+    if (!live && !(Date.now() - t0 < 20e3 && !(pr && pr.ref === refS))) return false;
+    if (pr && pr.ref === refS) {
+      const what = pr.phase === "maps" ? "Cartes" : "Données";
+      status(`${what} HRDPS en cours de téléchargement : ${Math.round(pr.done / pr.total * 100)} %`, pr.done / pr.total);
+      if (!app.data) $("empty-text").textContent = `Téléchargement des données HRDPS… ${Math.round(pr.done / pr.total * 100)} % (il continue même si vous fermez l'application)`;
+    }
+    await sleep(3000);
+  }
+}
+
 // ── refresh (port of hrdps.refresh) ──────────────────────────────────────────
 function status(textOrNull, frac = null) {
   $("status").hidden = textOrNull === null;
@@ -86,6 +152,7 @@ async function refresh(force = false) {
   const cfg = app.cfg;
   try {
     status("Recherche du dernier run HRDPS…");
+    await adoptNative();                                  // Android: what the background download already has, at once
     const ref = await H.latestRef();
     if (cfg !== app.cfg) return;
     if (ref === null) {
@@ -93,6 +160,10 @@ async function refresh(force = false) {
       return;
     }
     const refS = H.iso(ref), st = app.state;
+    if (inAndroidApp && !(st.ref === refS && app.data && st.maps_ref === refS && app.maps)) {
+      await waitNative(refS, cfg);
+      if (cfg !== app.cfg) return;
+    }
     const haveSeries = st.ref === refS && !!app.data;
     const haveMaps = st.maps_ref === refS && !!app.maps;
     if (!force && haveSeries && haveMaps) { await saveState({ checked: Date.now() }); status(null); return; }
