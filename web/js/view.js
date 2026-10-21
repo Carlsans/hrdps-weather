@@ -335,6 +335,7 @@ export class MapView {
       if (rate !== null && Math.abs(rate) >= 0.05) text(ctx, `(${ft(Math.abs(rate))} pi/h)`, tx, ly + (narrow ? 22 : 26), narrow ? 11 : 12, SUBTLE);
       let sub = obs ? "mesuré" : "prédit";
       if (obs && pred !== null && Math.abs(obs[1] - pred) >= 0.005) sub += ` · écart vs prédit ${fm(obs[1] - pred)} m (${ft(obs[1] - pred)} pi)`.replace("-", "−");
+      if (!td.fetched) sub += " · hors ligne (prédictions enregistrées)";
       const temp = td.waterTemperature(now);
       if (temp !== null) sub += ` · eau ${fm(temp, 1)} °C`;
       text(ctx, sub, px, narrow ? 94 : 112, narrow ? 11 : 12, SUBTLE);

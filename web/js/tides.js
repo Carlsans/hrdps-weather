@@ -2,7 +2,7 @@
 // IWLS web service: https://api-iwls.dfo-mpo.gc.ca  (Open Government Licence – Canada). Heights in metres.
 
 import { fx } from "./hrdps.js";
-import { get } from "./net.js";
+import { get, pool } from "./net.js";
 import * as store from "./store.js";
 
 const API = "https://api-iwls.dfo-mpo.gc.ca/api/v1";
@@ -11,6 +11,10 @@ const OPERATING_BONUS_KM = 15;
 const PAST = 24 * 3600e3, FUTURE = 72 * 3600e3;
 export const REFRESH_AFTER = 20 * 60;                           // seconds
 const STATIONS_MAX_AGE = 30 * 24 * 3600e3;
+const YEAR = 365 * 24 * 3600;                                    // predictions kept for offline use: a year ahead (~0.7 MB)
+const YEAR_TOP_UP_BELOW = 335 * 24 * 3600;                       // fetched again once less than this is left (about monthly)
+const YEAR_CHUNK = 30 * 24 * 3600;                               // the service refuses > 31 days of 15-minute predictions
+const YEAR_RETRY_AFTER = 3600e3;
 export const FEET_PER_M = 3.280839895;
 
 const isoZ = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -72,11 +76,37 @@ async function series(st, code, start, end, resolution) {
   return pts.sort((a, b) => a[0] - b[0]);
 }
 
+/** A year of predictions for station `st` from `now` (epoch seconds): {from, to, wlp, hilo}, or null when any part is
+ *  missing (a half year would silently run out). */
+export async function fetchYear(st, now, workers = 3) {
+  const start = now - 86400, end = now + YEAR;
+  const hilo = await series(st, "wlp-hilo", start * 1000, end * 1000, null);
+  if (hilo === null) return null;
+  const spans = [];
+  for (let a = start; a < end; a += YEAR_CHUNK) spans.push([a, Math.min(a + YEAR_CHUNK, end)]);
+  const parts = await pool(spans, workers, async ([a, b]) => {
+    for (let k = 0; k < 2; k++) {
+      const pts = await series(st, "wlp", a * 1000, b * 1000, "FIFTEEN_MINUTES");
+      if (pts !== null) return pts;
+    }
+    return null;
+  });
+  if (parts.some((p) => p === null)) return null;
+  const byTime = new Map(parts.flat());
+  return { from: start, to: end, wlp: [...byTime].sort((x, y) => x[0] - y[0]), hilo };
+}
+
 export class TideData {
   constructor(d) {
     this.station = d.station; this.fetched = d.fetched || 0;
     this.wlp = d.wlp || []; this.wlo = d.wlo || []; this.wlf = d.wlf || []; this.wt = d.wt || [];
     this.events = TideData.label(d.hilo || []);
+  }
+  /** Offline: the predictions around `now` (epoch seconds) out of the year kept on disk (no observations or surge). */
+  static fromYear(station, year, now) {
+    const lo = now - PAST / 1000, hi = now + FUTURE / 1000;
+    return new TideData({ station, fetched: 0, wlp: year.wlp.filter((p) => p[0] >= lo && p[0] <= hi),
+      hilo: year.hilo.filter((p) => p[0] >= lo) });
   }
   /** [[epoch, height, 'H'|'L']]: each extreme compared with its neighbours. */
   static label(hilo) {
@@ -127,9 +157,22 @@ export class Loader {
     this.place = place; this.network = network;
     this.data = null; this.state = "idle"; this.version = 0;
     this._busy = false; this._failedAt = 0; this._cacheRead = false;
+    this.year = null; this._yearFailedAt = 0;
     this._readCache();
   }
+  _sameStation(st) {
+    return st && Math.abs((st.qlat || 0) - this.place.latitude) < 0.01 && Math.abs((st.qlon || 0) - this.place.longitude) < 0.01
+      && String(st.code) === String(this.place.tide_station || st.code);
+  }
+  /** No fresh download: show the predictions kept for offline use, if there are any for this place. */
+  _fromYear() {
+    if (this.year && this.year.to > Date.now() / 1000) this.data = TideData.fromYear(this.year.station, this.year, Date.now() / 1000);
+  }
   async _readCache() {
+    try {
+      const y = await store.get("tides_year");
+      if (y && this._sameStation(y.station) && y.to > Date.now() / 1000) this.year = y;
+    } catch { /* none */ }
     try {
       const d = await store.get("tides");
       const st = d && d.station;
@@ -138,6 +181,7 @@ export class Loader {
         this.data = new TideData(d); this.version++;
       }
     } catch { /* no cache */ }
+    if (!this.data) this._fromYear();
     this._cacheRead = true; this.version++;
   }
   ensure() {
@@ -161,19 +205,38 @@ export class Loader {
         wt: ["wt1", now - 6 * 3600e3, now, "FIFTEEN_MINUTES"] };
       const got = this.data && this.data.station.code === st.code ? { ...this.data.toJSON() } : {};
       Object.assign(got, { station: st, fetched: Date.now() / 1000 });
+      let fresh = false;
       await Promise.all(Object.entries(jobs).map(async ([key, args]) => {
         const pts = await series(st, ...args);
         if (pts !== null) {
-          got[key] = pts;
+          got[key] = pts; fresh = true;
           if (got.wlp && got.hilo) { this.data = new TideData(got); this.version++; }    // usable once the predictions are in
         }
       }));
-      if (!(got.wlp && got.wlp.length)) throw new Error("no predictions");
+      if (!fresh || !(got.wlp && got.wlp.length)) throw new Error("no predictions");   // nothing new arrived: not a refresh
       this.data = new TideData(got);
       await store.set("tides", this.data.toJSON()).catch(() => {});
       this.state = "idle";
+      await this._keepAYear(st);
     } catch {
       this.state = "error"; this._failedAt = Date.now();
+      this._fromYear();
+    }
+  }
+
+  /** Once in a while (about monthly) store a year of predictions, so that the tides also work offline. */
+  async _keepAYear(st) {
+    const now = Date.now() / 1000, y = this.year;
+    if (y && y.station.code === st.code && y.to - now > YEAR_TOP_UP_BELOW) return;
+    if (Date.now() - this._yearFailedAt < YEAR_RETRY_AFTER) return;
+    try {
+      const got = await fetchYear(st, now);
+      if (!got) throw new Error("incomplete year");
+      got.station = st;
+      await store.set("tides_year", got);
+      this.year = got;
+    } catch {
+      this._yearFailedAt = Date.now();
     }
   }
 }

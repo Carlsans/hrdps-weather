@@ -557,6 +557,8 @@ class View:
             if obs and pred is not None and abs(obs[1] - pred) >= 0.005:
                 diff = obs[1] - pred
                 sub += f" · écart vs prédit {fm(diff)} m ({ft(diff)} pi)".replace("-", "−")
+            if not td.fetched:
+                sub += " · hors ligne (prédictions enregistrées)"
             temp = td.water_temperature(now)
             if temp is not None:
                 sub += f" · eau {fm(temp, 1)} °C"

@@ -171,6 +171,61 @@ def test_loader_without_network_does_nothing(isolated, monkeypatch):
     assert ld.data is None and not calls
 
 
+# ── a year kept for offline use ──────────────────────────────────────────────
+def test_fetch_year_asks_in_chunks_the_service_accepts_and_merges(monkeypatch):
+    spans = []
+
+    def fake_series(st, code, start, end, res):
+        if code == "wlp-hilo":
+            return [(start.timestamp() + 3600, 1.0), (end.timestamp() - 3600, 5.0)]
+        spans.append((end - start).total_seconds())
+        n = int((end - start).total_seconds() // 900)
+        return [(start.timestamp() + 900 * k, 2.0) for k in range(n + 1)]
+    monkeypatch.setattr(tides, "_series", fake_series)
+    now = 1_800_000_000
+    y = tides.fetch_year({"id": "x", "series": ["wlp", "wlp-hilo"]}, now)
+    assert len(spans) >= 13 and max(spans) <= 31 * 86400                            # 13 chunks, each within the limit
+    assert y["to"] - now == tides.YEAR and y["from"] == now - 86400
+    times = [t for t, _ in y["wlp"]]
+    assert times == sorted(set(times)) and times[-1] - times[0] > 364 * 86400       # one continuous, de-duplicated series
+    assert len(y["hilo"]) == 2
+
+
+def test_fetch_year_gives_nothing_rather_than_half_a_year(monkeypatch):
+    def fake_series(st, code, start, end, res):
+        return None if code == "wlp" and start.timestamp() > 1_800_000_000 + 100 * 86400 else [(start.timestamp(), 1.0)]
+    monkeypatch.setattr(tides, "_series", fake_series)
+    assert tides.fetch_year({"id": "x", "series": []}, 1_800_000_000) is None
+
+
+def test_year_is_stored_and_serves_the_tides_without_network(isolated, monkeypatch):
+    fake_service(monkeypatch)
+    ld = tides.Loader()
+    ld.ensure()
+    wait(ld)
+    assert ld.year is not None and tides._year_cache().exists()
+    assert tides._year_cache().stat().st_size < 3_000_000
+    tides._cache().unlink()                                                          # a later session, no fresh download…
+    fake_service(monkeypatch, fail_data=True)                                        # …and no network
+    off = tides.Loader()
+    assert off.data is not None and off.data.fetched == 0 and off.data.wlp and not off.data.wlo
+    off.ensure()
+    wait(off, lambda l: l.state == "error")
+    assert off.state == "error" and off.data is not None and off.data.station["code"] == "B"   # still shown
+
+
+def test_year_is_not_fetched_again_while_it_has_enough_left(isolated, monkeypatch):
+    calls = fake_service(monkeypatch)
+    ld = tides.Loader()
+    ld.ensure()
+    wait(ld)
+    n = len([c for c in calls if "wlp-hilo" in c])
+    ld.data.fetched = 0                                                               # force another refresh
+    ld.ensure()
+    wait(ld)
+    assert len([c for c in calls if "wlp-hilo" in c]) == n + 1                        # only the 4-day hilo, no new year
+
+
 # ── drawing ──────────────────────────────────────────────────────────────────
 def draw(data, loader):
     from cairo import ImageSurface, Context, FORMAT_ARGB32
