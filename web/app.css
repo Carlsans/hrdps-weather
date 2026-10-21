@@ -43,6 +43,12 @@ h1 { font-size: 20px; margin: 0; font-weight: 650; }
   font-size: 17px; font-weight: 650;
 }
 
+#apk-update {
+  display: block; margin: 0 0 10px; padding: 9px 14px; border-radius: 10px; background: var(--peach); color: var(--panel);
+  font-weight: 650; font-size: 14px; text-decoration: none; text-align: center;
+}
+#apk-update[hidden] { display: none; }
+
 /* status -------------------------------------------------------------------- */
 #status { display: flex; align-items: center; gap: 10px; margin-top: 8px; font-size: 13px; color: var(--subtle); }
 #status progress { flex: 1; max-width: 260px; height: 6px; accent-color: var(--blue); }

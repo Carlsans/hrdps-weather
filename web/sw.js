@@ -2,7 +2,7 @@
 //   - the app files are cached per version; a new version waits until the page asks to switch (banner)
 //   - OpenStreetMap tiles are kept on disk (cache first, refreshed in the background after a week)
 //   - GeoMet requests are never intercepted: weather data always comes from the network (or IndexedDB)
-const VERSION = "1.8.0";
+const VERSION = "1.8.1";
 const BUILD = "dev";                  // replaced by the commit id when GitHub Pages deploys (pages.yml)
 const SHELL = `shell-${VERSION}-${BUILD}`;
 const TILES = "osm-tiles";
@@ -11,7 +11,7 @@ const TILE_MAX_AGE = 7 * 864e5;
 const TILE_MAX_COUNT = 4000;
 const FILES = [
   "./", "index.html", "app.css", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png",
-  "icons/icon-maskable-512.png", "js/app.js", "js/astro.js", "js/climate.js", "js/config.js", "js/hrdps.js", "js/net.js",
+  "icons/icon-maskable-512.png", "js/app.js", "js/appupdate.js", "js/astro.js", "js/climate.js", "js/config.js", "js/hrdps.js", "js/net.js",
   "js/radar.js", "js/store.js", "js/tides.js", "js/tiles.js", "js/version.js", "js/view.js",
 ];
 

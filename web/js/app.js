@@ -1,5 +1,6 @@
 // The page: configuration, cache, background refresh, rendering loop and input (port of ui_tk.py + tray.py).
 
+import * as appupdate from "./appupdate.js";
 import * as astro from "./astro.js";
 import * as climate from "./climate.js";
 import * as config from "./config.js";
@@ -643,6 +644,34 @@ async function changePlace() {
   refresh();
 }
 
+// ── Android app: a newer APK on the releases page ────────────────────────────
+const APK_VERSION = /HrdpsWeatherAndroid\/([\d.]+)/.exec(navigator.userAgent)?.[1];
+const apkKey = "apk-update";
+function showApkUpdate(u) {
+  const a = $("apk-update");
+  if (!u) { a.hidden = true; return; }
+  a.href = u.url;
+  a.textContent = `⬆ Version ${u.version} de l'application disponible — voir la page des versions`;
+  a.hidden = false;
+}
+
+/** At startup and each return to the foreground, at most every few hours: is there a newer APK? */
+async function checkApk() {
+  if (!APK_VERSION) return;
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(apkKey) || "{}"); } catch { /* none */ }
+  if (saved.found && !appupdate.isNewer(saved.found.version, APK_VERSION)) saved.found = null;     // installed since
+  showApkUpdate(saved.found);                                       // known from last time: no network needed
+  if (Date.now() - (saved.checked || 0) < appupdate.CHECK_EVERY) return;
+  try {
+    const r = await fetch(appupdate.API, { headers: { Accept: "application/vnd.github+json" } });
+    if (!r.ok) return;
+    saved = { checked: Date.now(), found: appupdate.newerApk(await r.json(), APK_VERSION) };
+    try { localStorage.setItem(apkKey, JSON.stringify(saved)); } catch { /* private mode */ }
+    showApkUpdate(saved.found);
+  } catch { /* offline: next time */ }
+}
+
 // ── service worker (offline + installable) ───────────────────────────────────
 const AUTO_APPLY_MS = 20e3;              // an update found this soon after the page opened is applied silently
 function serviceWorker() {
@@ -691,6 +720,8 @@ async function main() {
   $("place-btn").addEventListener("click", () => openSettings(false));
   $("refresh").addEventListener("click", () => refresh(true));
   $("reload-app").addEventListener("click", reloadApp);
+  checkApk();
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) checkApk(); });
   try {                                                             // Android app: offer to add the widget
     if (window.HrdpsAndroid?.canPinWidget?.()) {
       $("pin-widget").hidden = false;
