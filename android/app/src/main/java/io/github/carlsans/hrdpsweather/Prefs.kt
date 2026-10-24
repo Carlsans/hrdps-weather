@@ -72,6 +72,10 @@ object Prefs {
         return old != p
     }
 
+    /** "Do not download while roaming": on unless the user switched it off. */
+    fun blockRoaming(c: Context): Boolean = sp(c).getBoolean("block_roaming", true)
+    fun setBlockRoaming(c: Context, on: Boolean) = sp(c).edit().putBoolean("block_roaming", on).apply()
+
     fun snapshot(c: Context): Snapshot? = Snapshot.fromJson(sp(c).getString("snapshot", null))
     fun setSnapshot(c: Context, s: Snapshot?) = sp(c).edit().putString("snapshot", s?.toJson()).apply()
 }

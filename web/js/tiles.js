@@ -3,6 +3,8 @@
 // in a small LRU; the service worker keeps the raw tiles on disk. While a tile is missing the caller falls back
 // to a coarser ancestor tile.
 
+import { blocked } from "./net.js";
+
 const TILE_URL = (z, x, y) => `https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
 export const MAX_ZOOM = 12;
 const MEM_TILES = 300;
@@ -84,7 +86,9 @@ export class TileCache {
       const key = this._queue.pop();                          // newest request first: the current view
       const [z, x, y] = key.split("/").map(Number);
       try {
-        const r = await fetch(TILE_URL(z, x, y), { mode: "cors" });
+        // Android, roaming: no download. The service worker still answers from the tiles it already keeps ("#offline").
+        if (blocked() && !navigator.serviceWorker?.controller) throw new Error("blocked");
+        const r = await fetch(TILE_URL(z, x, y) + (blocked() ? "#offline" : ""), { mode: "cors" });
         if (!r.ok) throw new Error(r.status);
         const bmp = await createImageBitmap(await r.blob());
         this._mem.set(key, darken(bmp));

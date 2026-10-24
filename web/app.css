@@ -129,6 +129,9 @@ dialog input {
   font: inherit; color: var(--text); background: var(--surface); border: 1px solid #313244; border-radius: 8px;
   padding: 9px 10px; width: 100%;
 }
+dialog label.check { flex-direction: row; align-items: flex-start; gap: 10px; font-size: 13.5px; color: var(--text); }
+dialog label.check input { width: 20px; height: 20px; flex: none; margin: 1px 0 0; accent-color: var(--blue); }
+dialog label.check small { display: block; color: var(--muted); font-size: 12px; }
 dialog .row { display: flex; gap: 10px; }
 dialog .wide { border: 0; border-radius: 10px; background: var(--surface); padding: 11px; font-weight: 600; }
 dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }

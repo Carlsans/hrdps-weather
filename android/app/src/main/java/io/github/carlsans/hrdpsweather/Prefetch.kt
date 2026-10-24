@@ -137,6 +137,10 @@ object Prefetch {
     // ── the job ──────────────────────────────────────────────────────────────
     suspend fun run(c: Context, armed: Boolean): Outcome = withContext(Dispatchers.IO) {
         val place = Prefs.place(c)
+        if (Roaming.blocked(c)) {                               // the user's choice: nothing downloaded while roaming
+            writeState(c) { remove("progress") }
+            return@withContext Outcome.DONE
+        }
         val ref = GeoMet.latestRef() ?: return@withContext Outcome.RETRY
         if (!armed) armRun(c, ref)
         val refIso = GeoMet.iso(ref)

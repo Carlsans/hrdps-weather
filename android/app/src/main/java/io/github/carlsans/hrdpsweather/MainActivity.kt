@@ -89,7 +89,7 @@ class MainActivity : ComponentActivity() {
         web.onResume()
         // The page stays in memory while the app is in the background, so the browser never navigates to it again and
         // never looks for a new version by itself: ask the service worker every time the app comes back.
-        web.evaluateJavascript(
+        if (!Roaming.blocked(this)) web.evaluateJavascript(
             "navigator.serviceWorker && navigator.serviceWorker.getRegistration().then(function (r) { if (r) r.update(); })", null)
     }
 
@@ -111,6 +111,23 @@ class MainActivity : ComponentActivity() {
             Widgets.refreshNow(applicationContext)
             Prefetch.now(applicationContext)                    // the whole run, downloaded in the background
         }
+
+        /** "Do not download while roaming" (on by default), the page's setting and its current state. */
+        @JavascriptInterface
+        fun blockRoaming(): Boolean = Prefs.blockRoaming(applicationContext)
+
+        @JavascriptInterface
+        fun setBlockRoaming(on: Boolean) {
+            Prefs.setBlockRoaming(applicationContext, on)
+            if (!on) { Widgets.refreshNow(applicationContext); Prefetch.now(applicationContext) }
+        }
+
+        @JavascriptInterface
+        fun isRoaming(): Boolean = Roaming.isRoaming(applicationContext)
+
+        /** True when downloads must not happen right now (the page asks before each batch of requests). */
+        @JavascriptInterface
+        fun roamingBlocked(): Boolean = Roaming.blocked(applicationContext)
 
         /** True when the launcher can add the widget from the app (Android 8+, most launchers). */
         @JavascriptInterface

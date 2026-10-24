@@ -5,7 +5,7 @@ import * as astro from "./astro.js";
 import * as climate from "./climate.js";
 import * as config from "./config.js";
 import * as H from "./hrdps.js";
-import { sleep } from "./net.js";
+import { setBlocker, sleep } from "./net.js";
 import * as store from "./store.js";
 import * as tides from "./tides.js";
 import { TileCache } from "./tiles.js";
@@ -137,6 +137,21 @@ async function waitNative(refS, cfg) {
 }
 
 // ── refresh (port of hrdps.refresh) ──────────────────────────────────────────
+// ── roaming (Android app only: "do not download while roaming", on by default) ───
+const ROAM_OK_FOR = 15 * 60e3;           // "download anyway" lasts this long
+let roamOkUntil = 0, roamAskedAt = 0, roamSeen = [0, false];
+const roamBridge = () => { try { return window.HrdpsAndroid?.roamingBlocked ? window.HrdpsAndroid : null; } catch { return null; } };
+/** True while downloads must not happen (asked to the app, at most every 3 s: this is called for every request). */
+function roamingBlocked() {
+  const b = roamBridge();
+  if (!b || Date.now() < roamOkUntil) return false;
+  if (Date.now() - roamSeen[0] > 3000) {
+    try { roamSeen = [Date.now(), !!b.roamingBlocked()]; } catch { roamSeen = [Date.now(), false]; }
+  }
+  return roamSeen[1];
+}
+const ROAM_TEXT = "Itinérance : téléchargements suspendus (réglage dans ⚙ Position).";
+
 function status(textOrNull, frac = null) {
   $("status").hidden = textOrNull === null;
   if (textOrNull === null) return;
@@ -149,6 +164,15 @@ function status(textOrNull, frac = null) {
 async function refresh(force = false) {
   if (app.busy || !app.cfg) return;
   lastAttempt = Date.now();
+  if (force && roamingBlocked()) {                        // a button press: ask twice (no dialog box in a WebView)
+    if (Date.now() - roamAskedAt < 10e3) { roamOkUntil = Date.now() + ROAM_OK_FOR; roamSeen = [0, false]; }
+    else { roamAskedAt = Date.now(); status(`${ROAM_TEXT} Touchez encore « Actualiser » pour télécharger quand même.`); return; }
+  }
+  if (roamingBlocked()) {
+    status(app.data ? `${ROAM_TEXT} Les dernières données restent affichées.` : ROAM_TEXT);
+    if (!app.data) $("empty-text").textContent = ROAM_TEXT;
+    return;
+  }
   app.busy = true;
   const cfg = app.cfg;
   try {
@@ -633,6 +657,13 @@ function openSettings(first = false) {
   f.location.value = c.location; f.latitude.value = c.latitude; f.longitude.value = c.longitude; f.timezone.value = c.timezone;
   f.tide_station.value = c.tide_station || "";
   $("settings-error").textContent = "";
+  const rb = roamBridge();                                // Android app: the roaming switch
+  $("roam-row").hidden = !rb;
+  $("roam-now").hidden = true;
+  if (rb) {
+    $("block-roaming").checked = !!rb.blockRoaming();
+    try { if (rb.isRoaming()) { $("roam-now").hidden = false; $("roam-now").textContent = "Vous êtes actuellement en itinérance."; } } catch { /* old app */ }
+  }
   $("settings-cancel").hidden = first;
   $("settings-intro").hidden = !first;
   dlg.showModal();
@@ -642,6 +673,11 @@ function settingsDialog() {
   const dlg = $("settings"), f = $("settings-form"), err = $("settings-error");
   dlg.addEventListener("cancel", (e) => { if (!app.cfg) e.preventDefault(); });     // first launch: a place is required
   $("settings-cancel").addEventListener("click", () => dlg.close());
+  $("block-roaming").addEventListener("change", (e) => {       // takes effect at once, without "Enregistrer"
+    try { roamBridge()?.setBlockRoaming(e.target.checked); } catch { /* old app */ }
+    roamSeen = [0, false]; roamOkUntil = 0;
+    if (!e.target.checked) { lastAttempt = 0; maybeRefresh(); app.tides?.ensure?.(); }
+  });
   $("geo").addEventListener("click", () => {
     if (!navigator.geolocation) { err.textContent = "La géolocalisation n'est pas disponible sur cet appareil."; return; }
     err.textContent = "Recherche de la position…";
@@ -710,7 +746,7 @@ async function checkApk() {
   try { saved = JSON.parse(localStorage.getItem(apkKey) || "{}"); } catch { /* none */ }
   if (saved.found && !appupdate.isNewer(saved.found.version, APK_VERSION)) saved.found = null;     // installed since
   showApkUpdate(saved.found);                                       // known from last time: no network needed
-  if (Date.now() - (saved.checked || 0) < appupdate.CHECK_EVERY) return;
+  if (Date.now() - (saved.checked || 0) < appupdate.CHECK_EVERY || roamingBlocked()) return;
   try {
     const r = await fetch(appupdate.API, { headers: { Accept: "application/vnd.github+json" } });
     if (!r.ok) return;
@@ -760,6 +796,7 @@ async function reloadApp() {
 
 // ── start ────────────────────────────────────────────────────────────────────
 async function main() {
+  setBlocker(roamingBlocked);
   $("version").textContent = VERSION;
   document.body.classList.add("nodata");
   $("empty").hidden = false;

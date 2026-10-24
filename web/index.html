@@ -93,6 +93,11 @@
       </div>
       <label>Fuseau horaire <input name="timezone" autocomplete="off" required></label>
       <label>Station de marées (code, facultatif) <input name="tide_station" autocomplete="off" inputmode="numeric" placeholder="automatique : la plus proche"></label>
+      <label class="check" id="roam-row" hidden>
+        <input type="checkbox" id="block-roaming">
+        <span>Ne rien télécharger en itinérance <small>(réseau mobile hors de votre forfait, p. ex. à l'étranger)</small></span>
+      </label>
+      <p class="muted small" id="roam-now" hidden></p>
       <p id="settings-error" class="error" role="alert"></p>
       <div class="actions">
         <button type="button" id="settings-cancel" class="chip">Annuler</button>

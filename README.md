@@ -96,7 +96,15 @@ ensemble :
   **cartes** (~25 Mo par run) seulement sur un réseau **non limité** (Wi-Fi) : sur données mobiles la page les
   télécharge elle-même, à l'ouverture. À l'ouverture, la page reprend ce qui est déjà là au lieu de tout retélécharger
   et affiche l'avancement du téléchargement en cours (qui continue si vous fermez l'application).
-- Permissions : Internet ; la position seulement si vous touchez *Utiliser ma position*.
+- **Itinérance** (1.9.1) : réglage **« Ne rien télécharger en itinérance »**, **activé par défaut**, dans ⚙ (la fenêtre
+  *Position*) ; il s'applique tout de suite. Quand le téléphone est sur un réseau mobile en itinérance (Android le
+  signale), l'application ne télécharge plus rien : ni le téléchargement en arrière-plan, ni les widgets, ni les
+  données, marées, radar ou normales de la page, ni les tuiles de carte nouvelles (celles déjà gardées restent
+  affichées), ni la recherche de mise à jour. Les dernières données restent visibles, un message l'indique, et le
+  bouton **↻ Actualiser** (deux touches de suite) télécharge quand même pendant 15 minutes. Le Wi-Fi n'est pas
+  concerné : tout reprend dès que vous n'êtes plus en itinérance.
+- Permissions : Internet et état du réseau (pour détecter la mesure de données et l'itinérance) ; la position
+  seulement si vous touchez *Utiliser ma position*.
 - L'APK est signé (certificat SHA-256 `6a:cf:23:46:f4:8b:a0:d3:cc:74:9a:0b:d5:14:dd:9b:01:41:b7:d0:8b:68:0b:41:54:ea:db:52:72:6a:6f:6a`)
   et son empreinte est publiée avec la release (`SHA256SUMS-android.txt`, signé Ed25519 comme les autres).
 

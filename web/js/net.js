@@ -3,8 +3,15 @@
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** Body of a 200 response (as text, bytes or blob), or null (network error, 4xx/5xx). */
+// Android app: "do not download while roaming". app.js installs the check; every request goes through get() below
+// (tiles and the app-version check ask `blocked()` themselves), so one switch stops them all.
+let blocker = () => false;
+export const setBlocker = (fn) => { blocker = fn; };
+export const blocked = () => blocker();
+
+/** Body of a 200 response (as text, bytes or blob), or null (network error, 4xx/5xx, or downloads blocked). */
 export async function get(url, { as = "text", timeout = 30000, tries = 2, signal } = {}) {
+  if (blocker()) return null;
   for (let attempt = 0; attempt < tries; attempt++) {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), timeout);

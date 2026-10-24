@@ -174,6 +174,10 @@ class WidgetWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         val place = Prefs.place(c)
         val zone = runCatching { ZoneId.of(place.timezone) }.getOrDefault(ZoneId.systemDefault())
         val detailed = Widgets.largeIds(c).isNotEmpty()                 // only download the extras when they are shown
+        if (Roaming.blocked(c)) {                                       // the user's choice: no download while roaming
+            Widgets.render(c)                                           // (the last snapshot stays; the next job looks again)
+            return Result.success()
+        }
         val ref = GeoMet.latestRef() ?: return Result.retry()
         val now = Instant.now()
         if (Widgets.BOUNDARY !in tags) Widgets.armBoundaries(c, ref, now)
