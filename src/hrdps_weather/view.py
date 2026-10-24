@@ -206,6 +206,27 @@ def to_surface(rgba):
     buf = bytearray(bgra.tobytes())
     return cairo.ImageSurface.create_for_data(buf, cairo.FORMAT_ARGB32, w, h, w * 4), buf
 
+# ── Size of the window ("A−" / "A+"): remembered between runs ────────────────────
+UI_ZOOMS = (0.7, 0.8, 0.9, 1.0, 1.15, 1.3, 1.5, 1.75, 2.0)
+
+def next_ui_zoom(z, direction):
+    """The following (+1) or previous (-1) step of UI_ZOOMS."""
+    k = min(range(len(UI_ZOOMS)), key=lambda i: abs(UI_ZOOMS[i] - z))
+    return UI_ZOOMS[min(max(k + direction, 0), len(UI_ZOOMS) - 1)]
+
+def load_ui_zoom():
+    try:
+        z = float((hrdps.CACHE / "ui_zoom").read_text())
+        return z if z in UI_ZOOMS else 1.0
+    except (OSError, ValueError):
+        return 1.0
+
+def save_ui_zoom(z):
+    try:
+        (hrdps.CACHE / "ui_zoom").write_text(str(z))
+    except OSError:
+        pass
+
 # ── The view ─────────────────────────────────────────────────────────────────
 class View:
     def __init__(self, data, tiles=None, prefetch_radar=False):
@@ -218,6 +239,7 @@ class View:
         self.t = float(self.i0)
         self.layer, self.playing, self.speed = "rt", True, 2.0       # speed: model hours per second
         self.hits = []
+        self.ui_zoom = 1.0                                         # size of the window (set by the window, shown in the header)
         self.maps = None                                           # {"region": (grids, bounds), "wide": ...}
         self.status = ""                                           # message shown over the map
         self.tiles = tiles                                         # tiles.TileCache or None (no base map)
@@ -352,6 +374,20 @@ class View:
                 return tag, arg
         return None, None
 
+    def t_from_tide(self, x, geom):
+        """Move target for a click on the tides chart: model index (float) of the moment under x."""
+        t0, t1, cx0, cx1 = geom
+        sec = t0 + min(max((x - cx0) / (cx1 - cx0), 0.0), 1.0) * (t1 - t0)
+        utc = [u.timestamp() for u in self.d.utc]
+        if sec <= utc[self.i0]:
+            return float(self.i0)
+        if sec >= utc[self.i1]:
+            return float(self.i1)
+        i = self.i0
+        while i < self.i1 - 1 and utc[i + 1] <= sec:
+            i += 1
+        return i + (sec - utc[i]) / (utc[i + 1] - utc[i])
+
     def t_from_x(self, x, x0, w):
         return min(max(self.i0 + (x - x0) / w * (self.i1 - self.i0), self.i0), self.i1)
 
@@ -432,12 +468,20 @@ class View:
              W - M, 46, 13, MUTED, False, "r")
         text(cr, "Environnement Canada · GeoMet", W - M, 66, 11, MUTED, False, "r")
         text(cr, hrdps.next_run_text(d.ref), W - M, 84, 12, SUBTLE, True, "r")
+        zx = W - M                                                 # window size: A- / 100 % / A+ (Ctrl + wheel or +/-)
+        for label, tag, bw in (("A+", "ui_zoom_in", 30), (f"{self.ui_zoom * 100:.0f} %", "ui_zoom_reset", 52), ("A−", "ui_zoom_out", 30)):
+            zx -= bw
+            cr.set_source_rgb(*SURFACE); rrect(cr, zx, 98, bw, 18, 7); cr.fill()
+            text(cr, label, zx + bw / 2, 107, 11, SUBTLE, True, "c", "m")
+            self.hits.append(((zx, 98, bw, 18), tag, None))
+            zx -= 6
         up = self.updater
         if up is not None and up.message:                          # update banner (click or press U to install)
-            lw = text(cr, up.message, W - M - 12, 101, 12, PANEL, True, "r")
-            cr.set_source_rgb(*PEACH); rrect(cr, W - M - lw - 24, 98, lw + 24, 18, 9); cr.fill()
-            text(cr, up.message, W - M - 12, 100, 12, PANEL, True, "r")
-            self.hits.append(((W - M - lw - 24, 98, lw + 24, 18), "update", None))
+            bx = zx - 6
+            lw = text(cr, up.message, bx - 12, 101, 12, PANEL, True, "r")
+            cr.set_source_rgb(*PEACH); rrect(cr, bx - lw - 24, 98, lw + 24, 18, 9); cr.fill()
+            text(cr, up.message, bx - 12, 100, 12, PANEL, True, "r")
+            self.hits.append(((bx - lw - 24, 98, lw + 24, 18), "update", None))
 
     # map -----------------------------------------------------------------------
     def draw_map(self, cr):
@@ -580,6 +624,8 @@ class View:
         vmin, vmax = min(vals) - 1.0, max(vals) + 1.0                 # room for the two-line labels of highs and lows
         Y = lambda v: cy0 + ch - (v - vmin) / (vmax - vmin) * ch
         cr.set_source_rgb(*SURFACE); rrect(cr, cx0, cy0, cx1 - cx0, ch, 8); cr.fill()
+        self.hits.append(((cx0, cy0 - 6, cx1 - cx0, ch + 34), "tide_chart", (t0, t1, cx0, cx1)))   # click / drag moves the time line
+        text(cr, "↔ cliquer ou glisser pour changer l'heure", cx1, cy0 - 14, 9, MUTED, False, "r")
         cr.save(); rrect(cr, cx0, cy0, cx1 - cx0, ch, 8); cr.clip()
         step = 1 if vmax - vmin <= 8 else 2
         for g in range(math.ceil(vmin / step), int(vmax // step) + 1):

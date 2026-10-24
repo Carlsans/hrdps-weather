@@ -193,6 +193,15 @@ station, ajoutez `tide_station = "03248"` (son code) dans `config.toml`.
 « hors ligne » ; pas de niveaux observés ni de surcote). Les prédictions sont des tables astronomiques : elles ne
 tiennent pas compte de la météo.
 
+**Taille de l'affichage** — trois boutons **A− · 100 % · A+** (sous le nom du lieu dans l'appli web et Android, en haut
+à droite de la fenêtre Linux/Windows) agrandissent ou réduisent tout l'affichage — texte, cartes et graphiques — de
+80 à 200 % (fenêtre : 70 à 200 %, dans la limite de l'écran). Le choix est mémorisé sur l'appareil. Au clavier :
+`Ctrl` + `+` / `−` / `0` ou `Ctrl` + molette dans la fenêtre (navigateur : les raccourcis habituels du navigateur
+fonctionnent aussi). Sur téléphone, c'est le moyen de lire plus gros sans changer la taille du texte d'Android.
+
+**Heure sur le panneau Marées** — touchez ou **glissez le doigt (ou la souris) sur la courbe des marées** : la ligne
+jaune suit et l'heure choisie (carte, graphiques et détails) change avec elle. Le curseur d'en bas fonctionne toujours.
+
 **Temps** — espace : lecture/pause · ←/→ : ±1 h · ↑/↓ : vitesse · 1–6 : couche · +/− : zoom · Home : maintenant ·
 Échap : fermer. Glissez le curseur ou survolez un graphique (en pause) pour explorer le temps. En mode radar, le
 curseur parcourt les images du radar ; les graphiques restent sur l'heure choisie.

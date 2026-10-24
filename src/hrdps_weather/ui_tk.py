@@ -32,8 +32,10 @@ class WeatherWindow:
             pass
         self.top.configure(bg="#1e1e2e")
         sw, sh = self.top.winfo_screenwidth(), self.top.winfo_screenheight()
-        self.scale = max(0.5, min(sw * 0.92 / wv.W, sh * 0.86 / wv.H, 1.25))
-        self.w, self.h = int(wv.W * self.scale), int(wv.H * self.scale)
+        self.base = max(0.5, min(sw * 0.92 / wv.W, sh * 0.86 / wv.H, 1.25))
+        self.zoom = wv.load_ui_zoom()                    # "A−" / "A+": the window may grow up to the screen
+        self.fit = min(sw * 0.98 / wv.W, sh * 0.94 / wv.H)
+        self._size()
         self.label = tk.Label(self.top, bd=0, highlightthickness=0, bg="#1e1e2e")
         self.label.pack()
         self.top.resizable(False, False)
@@ -41,6 +43,7 @@ class WeatherWindow:
         self.view = None
         self.loading = False
         self.drag = None
+        self.drag_arg = None
         self._press = (0, 0)
         self.updater = updater
         if updater is None:                                  # standalone window: own updater (off by default)
@@ -74,6 +77,18 @@ class WeatherWindow:
         self._make_view()
         self._frame()
 
+    def _size(self):
+        self.scale = max(0.35, min(self.base * self.zoom, max(self.fit, self.base)))
+        self.w, self.h = int(wv.W * self.scale), int(wv.H * self.scale)
+
+    def set_zoom(self, z):
+        self.zoom = z
+        self._size()
+        wv.save_ui_zoom(z)
+        if self.view is not None:
+            self.view.ui_zoom = z
+        self._dirty = True
+
     # ── data ─────────────────────────────────────────────────────────────────
     def _make_view(self):
         d = hrdps.load()
@@ -82,6 +97,7 @@ class WeatherWindow:
             self.view.updater = self.updater
             self.view.climate = self.normals
             self.view.tides = self.tide_loader
+            self.view.ui_zoom = self.zoom
             self.view.status = "Cartes en téléchargement…"
 
     def _start_maps(self):
@@ -145,10 +161,12 @@ class WeatherWindow:
     def _xy(self, e):
         return e.x / self.scale, e.y / self.scale
 
-    def _scrub(self, tag, x):
+    def _scrub(self, tag, x, arg=None):
         v = self.view
         if tag == "slider":
             v.slider_set(x)
+        elif tag == "tide_chart":
+            v.t = v.t_from_tide(x, arg)
         else:
             v.t = v.t_from_x(x, *v.chart_geom)
 
@@ -176,13 +194,19 @@ class WeatherWindow:
             v.zoom_by(-0.5)
         elif tag == "zoom_reset":
             v.reset_camera()
+        elif tag == "ui_zoom_in":
+            self.set_zoom(wv.next_ui_zoom(self.zoom, +1))
+        elif tag == "ui_zoom_out":
+            self.set_zoom(wv.next_ui_zoom(self.zoom, -1))
+        elif tag == "ui_zoom_reset":
+            self.set_zoom(1.0)
         elif tag == "map":
             v.begin_pan()
             self.drag = "map"
-        elif tag in ("slider", "chart"):
+        elif tag in ("slider", "chart", "tide_chart"):
             v.playing = False
-            self._scrub(tag, x)
-            self.drag = tag
+            self._scrub(tag, x, arg)
+            self.drag, self.drag_arg = tag, arg
 
     def on_double(self, e):
         v = self.view
@@ -195,6 +219,9 @@ class WeatherWindow:
     def on_wheel(self, e, direction=None):
         v = self.view
         if v is None:
+            return
+        if getattr(e, "state", 0) & 0x4:                                # Ctrl + wheel: size of the window
+            self.set_zoom(wv.next_ui_zoom(self.zoom, direction if direction is not None else (1 if e.delta > 0 else -1)))
             return
         x, y = self._xy(e)
         if v.hit(x, y)[0] in ("map", "zoom_in", "zoom_out", "zoom_reset"):
@@ -210,7 +237,7 @@ class WeatherWindow:
         if self.drag == "map":
             v.pan_to(x - self._press[0], y - self._press[1])
         else:
-            self._scrub(self.drag, x)
+            self._scrub(self.drag, x, self.drag_arg)
         self._dirty = True
 
     def on_motion(self, e):
@@ -225,6 +252,9 @@ class WeatherWindow:
         v, k = self.view, e.keysym
         if k in ("q", "Q"):
             self.close(); return
+        if getattr(e, "state", 0) & 0x4 and k in ("plus", "equal", "KP_Add", "minus", "KP_Subtract", "0", "KP_0"):   # Ctrl + / - / 0
+            self.set_zoom(1.0 if k in ("0", "KP_0") else wv.next_ui_zoom(self.zoom, +1 if k in ("plus", "equal", "KP_Add") else -1))
+            return
         if v is None:
             return
         if k == "space":

@@ -307,3 +307,45 @@ def test_tab_and_strip_draw_with_the_bare_text_backend(data, monkeypatch):
     v.layer = "rt"
     v.draw(Context(ImageSurface(FORMAT_ARGB32, view.W, view.H)), view.W, view.H)       # the strip with the link button
     assert getattr(v, "errors", 0) == 0 and not any(ch in "".join(seen) for ch in "↗")
+
+
+def live_loader(d):
+    now = time.time()
+    loader = tides.Loader(network=False)
+    loader.data = tides.TideData({"station": dict(d.station, km=6.6), "fetched": now, "wlp": sine_tide(now - 24 * 3600, 96),
+                                  "hilo": [(now + h * 3600, 5.0 if k % 2 == 0 else 0.1) for k, h in enumerate(range(2, 40, 6))],
+                                  "wlo": [(now - h * 900, 2.5) for h in range(60, -1, -1)], "wt": [(now - 600, 12.4)],
+                                  "wlf": sine_tide(now - 24 * 3600, 96, amp=2.7)})
+    return loader
+
+
+def test_clicking_the_tides_chart_moves_the_time_line(data, td, monkeypatch):
+    now0 = data.utc[0].timestamp() + 3 * 3600                                    # the sample run is old: pretend it is now
+    monkeypatch.setattr(time, "time", lambda: now0)
+    monkeypatch.setattr(type(data), "now_index", lambda self: 3)
+    v = draw(data, live_loader(td[0]))
+    (x, y, w, h), tag, geom = next(hb for hb in v.hits if hb[1] == "tide_chart")
+    assert v.hit(x + w / 2, y + 20)[0] == "tide_chart"
+    t0, t1, cx0, cx1 = geom
+    # the left end is the oldest moment shown: kept at the start of the forecast; the right end is the last hour
+    assert v.t_from_tide(cx0 - 50, geom) == v.i0
+    assert v.t_from_tide(cx1 + 50, geom) == v.i1
+    mid = v.t_from_tide((cx0 + cx1) / 2, geom)
+    assert v.i0 <= mid <= v.i1
+    # moving right moves later; the index is the fractional hour of the model
+    a, b = v.t_from_tide(cx0 + 0.55 * (cx1 - cx0), geom), v.t_from_tide(cx0 + 0.75 * (cx1 - cx0), geom)
+    assert a < b
+    secs = lambda i: v.d.utc[int(i)].timestamp() + (i - int(i)) * 3600
+    assert secs(b) - secs(a) == pytest.approx(0.2 * (t1 - t0), abs=1)
+
+
+def test_ui_zoom_steps_and_memory(tmp_path, monkeypatch):
+    assert view.next_ui_zoom(1.0, +1) > 1.0 > view.next_ui_zoom(1.0, -1)
+    assert view.next_ui_zoom(view.UI_ZOOMS[-1], +1) == view.UI_ZOOMS[-1]
+    assert view.next_ui_zoom(view.UI_ZOOMS[0], -1) == view.UI_ZOOMS[0]
+    monkeypatch.setattr(view.hrdps, "CACHE", tmp_path)
+    assert view.load_ui_zoom() == 1.0
+    view.save_ui_zoom(1.5)
+    assert view.load_ui_zoom() == 1.5
+    (tmp_path / "ui_zoom").write_text("nonsense")
+    assert view.load_ui_zoom() == 1.0

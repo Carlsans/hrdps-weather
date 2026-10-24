@@ -362,7 +362,7 @@ function updateDetails() {
 // ── canvases ─────────────────────────────────────────────────────────────────
 const canv = {};
 function fit(id, w, h) {
-  const c = $(id), dpr = window.devicePixelRatio || 1;
+  const c = $(id), dpr = (window.devicePixelRatio || 1) * uiZoom;
   const W = Math.round(w * dpr), Hh = Math.round(h * dpr);
   if (c.width !== W || c.height !== Hh) { c.width = W; c.height = Hh; }
   if (id !== "map") c.style.height = `${h}px`;
@@ -371,18 +371,54 @@ function fit(id, w, h) {
   canv[id] = { ctx, w, h, dpr };
 }
 
+// ── display zoom ("A−" / "A+"): the whole page is enlarged, so the canvases get fewer layout pixels and
+// draw their text relatively bigger. Sizes below are layout pixels (offsetWidth), not the enlarged ones.
+const ZOOMS = [0.8, 0.9, 1, 1.15, 1.3, 1.5, 1.75, 2];
+const ZOOM_KEY = "ui_zoom";
+let uiZoom = 1;
+function readZoom() {
+  try { const z = Number(localStorage.getItem(ZOOM_KEY)); if (ZOOMS.includes(z)) return z; } catch { /* private mode */ }
+  return 1;
+}
+function applyLayout() {
+  const w = window.innerWidth / uiZoom, cl = document.documentElement.classList;
+  cl.toggle("md", w >= 600); cl.toggle("wide", w >= 1100);
+}
+function setZoom(z) {
+  uiZoom = z;
+  document.documentElement.style.zoom = z === 1 ? "" : String(z);
+  document.documentElement.style.setProperty("--tall", String(1.25 + Math.max(z - 1, 0) * 0.85));   // tides panel: height / width
+  try { localStorage.setItem(ZOOM_KEY, String(z)); } catch { /* private mode */ }
+  $("zoom-reset").textContent = `${Math.round(z * 100)} %`;
+  $("zoom-out").disabled = z <= ZOOMS[0]; $("zoom-in").disabled = z >= ZOOMS.at(-1);
+  resize();
+}
+function zoomStep(dir) {
+  const k = ZOOMS.indexOf(uiZoom);
+  setZoom(ZOOMS[Math.min(Math.max(k + dir, 0), ZOOMS.length - 1)]);
+}
+function zoomInput() {
+  $("zoom-out").addEventListener("click", () => zoomStep(-1));
+  $("zoom-in").addEventListener("click", () => zoomStep(+1));
+  $("zoom-reset").addEventListener("click", () => setZoom(1));
+  uiZoom = readZoom();
+  setZoom(uiZoom);
+}
+
 function resize() {
-  const box = document.querySelector(".map-box").getBoundingClientRect();
-  if (box.width > 0) {
-    fit("map", box.width, box.height);
-    app.view?.resize(box.width, box.height);
+  applyLayout();
+  const box = $("map").parentElement;
+  const bw = box.offsetWidth, bh = box.offsetHeight;
+  if (bw > 0) {
+    fit("map", bw, bh);
+    app.view?.resize(bw, bh);
   }
-  const sw = $("slider").getBoundingClientRect().width;
+  const sw = $("slider").offsetWidth;
   if (sw > 0) fit("slider", sw, 40);
-  const cw = $("charts").parentElement.getBoundingClientRect().width;
+  const cw = $("charts").parentElement.offsetWidth;
   if (cw > 0) {
-    const wide = matchMedia("(min-width: 1100px)").matches;
-    const left = document.querySelector(".left").getBoundingClientRect().height;
+    const wide = document.documentElement.classList.contains("wide");
+    const left = document.querySelector(".left").offsetHeight;
     fit("charts", cw, wide ? Math.max(left, 600) : Math.round(Math.min(Math.max(cw * 1.45, 560), 780)));
   }
   app.dirty = true;
@@ -430,11 +466,17 @@ function syncLayerButtons() {
 function setLayer(key) {
   if (!app.view) return;
   app.view.layer = key;
+  document.querySelector(".map-box").classList.toggle("tall", key === "tides");     // the tides panel needs height
   syncLayerButtons();
+  resize();
   app.dirty = true;
 }
 
-const local = (e, el) => { const r = el.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+/** Pointer position in the canvas's own (layout) pixels, whatever the display zoom. */
+const local = (e, el) => {
+  const r = el.getBoundingClientRect(), k = r.width / (el.offsetWidth || r.width) || 1;
+  return [(e.clientX - r.left) / k, (e.clientY - r.top) / k];
+};
 
 function mapInput() {
   const el = $("map"), ptrs = new Map();
@@ -453,13 +495,17 @@ function mapInput() {
     }
     if (ptrs.size > 2) return;
     moved = false;
-    const [tag] = v.hit(x, y);
+    const [tag, arg] = v.hit(x, y);
     if (tag === "zoom_in") v.zoomBy(+0.5);
     else if (tag === "zoom_out") v.zoomBy(-0.5);
     else if (tag === "zoom_reset") v.reset();
     else if (tag === "map") {
       v.beginPan();
       el._press = [x, y];
+    } else if (tag === "tide_chart") {                     // the tides panel: the time line follows the finger
+      v.playing = false;
+      el._tide = arg;
+      v.tideSet(x, arg);
     }
   });
   el.addEventListener("pointermove", (e) => {
@@ -475,6 +521,8 @@ function mapInput() {
       v.setCenter(cx - (mid[0] - pinch.mid[0]), cy - (mid[1] - pinch.mid[1]));
       pinch = { dist, mid };
       moved = true;
+    } else if (el._tide && ptrs.size === 1) {
+      v.tideSet(x, el._tide);
     } else if (el._press && ptrs.size === 1) {
       const dx = x - el._press[0], dy = y - el._press[1];
       if (Math.abs(dx) + Math.abs(dy) > 3) moved = true;
@@ -492,7 +540,7 @@ function mapInput() {
       el._press = [...ptrs.values()][0]; v?.beginPan();
     }
     if (ptrs.size === 0) {
-      el._press = null;
+      el._press = null; el._tide = null;
       if (e.type === "pointerup" && !moved && v && v.hit(x, y)[0] === "map") {    // double tap / double click: zoom in
         if (e.timeStamp - lastTap.t < 320 && Math.hypot(x - lastTap.x, y - lastTap.y) < 30) {
           v.zoomBy(+1.0, x, y); lastTap = { t: 0, x: 0, y: 0 };
@@ -716,7 +764,7 @@ async function main() {
   document.body.classList.add("nodata");
   $("empty").hidden = false;
   buildLayerButtons();
-  mapInput(); sliderInput(); chartInput(); keyboard(); settingsDialog();
+  mapInput(); sliderInput(); chartInput(); keyboard(); settingsDialog(); zoomInput();
   $("place-btn").addEventListener("click", () => openSettings(false));
   $("refresh").addEventListener("click", () => refresh(true));
   $("reload-app").addEventListener("click", reloadApp);

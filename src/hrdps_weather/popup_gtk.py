@@ -55,6 +55,7 @@ def run_gtk():
             v.layer = os.environ["HRDPS_LAYER"]
         v.climate = normals
         v.tides = tide_loader
+        v.ui_zoom = state.get("zoom", 1.0)
         v.status = "Cartes en téléchargement…"
         return v
 
@@ -85,10 +86,20 @@ def run_gtk():
         win.set_resizable(False)
 
         area = Gtk.DrawingArea()
-        area.set_content_width(wv.W)
-        area.set_content_height(wv.H)
+        state["zoom"] = wv.load_ui_zoom()                  # "A−" / "A+" : size of the window
+        area.set_content_width(round(wv.W * state["zoom"]))
+        area.set_content_height(round(wv.H * state["zoom"]))
         win.set_child(area)
         state["area"] = area
+
+        def set_zoom(z):
+            state["zoom"] = z
+            area.set_content_width(round(wv.W * z))
+            area.set_content_height(round(wv.H * z))
+            wv.save_ui_zoom(z)
+            if state["view"] is not None:
+                state["view"].ui_zoom = z
+            redraw()
 
         def device_scale():
             """Real pixels per logical pixel (1.3 on a 130 % display)."""
@@ -129,9 +140,11 @@ def run_gtk():
         area.set_draw_func(draw)
 
         # ── interaction ───────────────────────────────────────────────────────
-        def scrub(v, tag, x):
+        def scrub(v, tag, x, arg=None):
             if tag == "slider":
                 v.slider_set(x)
+            elif tag == "tide_chart":
+                v.t = v.t_from_tide(x, arg)
             else:
                 v.t = v.t_from_x(x, *v.chart_geom)
 
@@ -139,6 +152,7 @@ def run_gtk():
             v = state["view"]
             if v is None:
                 return
+            x, y = x / state["zoom"], y / state["zoom"]          # back to the design space
             tag, arg = v.hit(x, y)
             if tag == "layer":
                 v.layer = arg
@@ -156,19 +170,26 @@ def run_gtk():
                 v.zoom_by(-0.5)
             elif tag == "zoom_reset":
                 v.reset_camera()
+            elif tag == "ui_zoom_in":
+                set_zoom(wv.next_ui_zoom(state["zoom"], +1))
+            elif tag == "ui_zoom_out":
+                set_zoom(wv.next_ui_zoom(state["zoom"], -1))
+            elif tag == "ui_zoom_reset":
+                set_zoom(1.0)
             elif tag == "map":
                 if n == 2:
                     v.zoom_by(+1.0, x, y)                      # double-click zooms in on that point
                 v.begin_pan(); state["drag"] = "map"
-            elif tag in ("slider", "chart"):
+            elif tag in ("slider", "chart", "tide_chart"):
                 v.playing = False
-                scrub(v, tag, x)
-                state["drag"] = tag
+                scrub(v, tag, x, arg)
+                state["drag"], state["drag_arg"] = tag, arg
             redraw()
         click = Gtk.GestureClick(); click.connect("pressed", on_press); area.add_controller(click)
 
         def on_motion(c, x, y):
             v = state["view"]
+            x, y = x / state["zoom"], y / state["zoom"]
             if v is not None and not v.playing and v.hit(x, y)[0] == "chart":   # hover scrubs while paused
                 v.t = v.t_from_x(x, *v.chart_geom); redraw()
         mot = Gtk.EventControllerMotion(); mot.connect("motion", on_motion); area.add_controller(mot)
@@ -179,10 +200,11 @@ def run_gtk():
             if v is None or not state["drag"]:
                 return
             ok, sx, sy = g.get_start_point()
+            z = state["zoom"]
             if state["drag"] == "map":
-                v.pan_to(dx, dy)
+                v.pan_to(dx / z, dy / z)
             else:
-                scrub(v, state["drag"], sx + dx)
+                scrub(v, state["drag"], (sx + dx) / z, state.get("drag_arg"))
             redraw()
         drag.connect("drag-update", on_drag)
         drag.connect("drag-end", lambda *_: state.update(drag=None))
@@ -196,8 +218,12 @@ def run_gtk():
 
         def on_scroll(c, dx, dy):
             v = state["view"]
-            if v is not None and v.hit(mouse["x"], mouse["y"])[0] in ("map", "zoom_in", "zoom_out", "zoom_reset"):
-                v.zoom_by(-0.4 * dy, mouse["x"], mouse["y"]); redraw()
+            if c.get_current_event_state() & Gdk.ModifierType.CONTROL_MASK:        # Ctrl + wheel: size of the window
+                set_zoom(wv.next_ui_zoom(state["zoom"], -1 if dy > 0 else 1))
+                return True
+            mx, my = mouse["x"] / state["zoom"], mouse["y"] / state["zoom"]
+            if v is not None and v.hit(mx, my)[0] in ("map", "zoom_in", "zoom_out", "zoom_reset"):
+                v.zoom_by(-0.4 * dy, mx, my); redraw()
                 return True
             return False
         scroll.connect("scroll", on_scroll)
@@ -208,6 +234,9 @@ def run_gtk():
             name = Gdk.keyval_name(keyval)
             if name in ("Escape", "q"):
                 app.quit(); return True
+            if mods & Gdk.ModifierType.CONTROL_MASK and name in ("plus", "equal", "KP_Add", "minus", "KP_Subtract", "0", "KP_0"):
+                set_zoom(1.0 if name in ("0", "KP_0") else wv.next_ui_zoom(state["zoom"], +1 if name in ("plus", "equal", "KP_Add") else -1))
+                return True
             if v is None:
                 return True
             if name == "space":
