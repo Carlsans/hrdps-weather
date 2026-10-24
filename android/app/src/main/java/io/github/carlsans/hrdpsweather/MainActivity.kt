@@ -129,6 +129,13 @@ class MainActivity : ComponentActivity() {
         @JavascriptInterface
         fun roamingBlocked(): Boolean = Roaming.blocked(applicationContext)
 
+        /** Opens a page of this project (GitHub) in the browser: the releases page, to install a newer APK. */
+        @JavascriptInterface
+        fun openReleases(url: String) {
+            val target = if (url.startsWith(PROJECT_URL)) url else RELEASES_URL
+            runOnUiThread { openOutside(Uri.parse(target)) }
+        }
+
         /** True when the launcher can add the widget from the app (Android 8+, most launchers). */
         @JavascriptInterface
         fun canPinWidget(): Boolean = AppWidgetManager.getInstance(this@MainActivity).isRequestPinAppWidgetSupported
@@ -145,11 +152,21 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** In the browser; when no browser answers, the address is copied and shown so that it can be pasted anywhere. */
+    private fun openOutside(url: Uri) {
+        val view = Intent(Intent.ACTION_VIEW, url).addCategory(Intent.CATEGORY_BROWSABLE)
+        if (runCatching { startActivity(view) }.isSuccess) return
+        if (runCatching { startActivity(Intent.createChooser(view, null)) }.isSuccess) return
+        val clip = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        clip.setPrimaryClip(android.content.ClipData.newPlainText("lien", url.toString()))
+        android.widget.Toast.makeText(this, "Aucun navigateur trouvé. Adresse copiée : $url", android.widget.Toast.LENGTH_LONG).show()
+    }
+
     private inner class Client : WebViewClient() {
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
             val url = request.url
             if (url.host == APP_HOST && url.path.orEmpty().startsWith(APP_PATH)) return false
-            runCatching { startActivity(Intent(Intent.ACTION_VIEW, url)) }      // links (source code…) open outside
+            openOutside(url)                                                    // links (source code…) open outside
             return true
         }
 
@@ -197,6 +214,8 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
+        private const val PROJECT_URL = "https://github.com/Carlsans/hrdps-weather/"
+        private const val RELEASES_URL = PROJECT_URL + "releases/latest"
         val APP_URL: String = BuildConfig.APP_URL                     // GitHub Pages (debug builds: this computer)
         private const val PURGE_SHELL_JS =
             "(async function () { try { var rs = await navigator.serviceWorker.getRegistrations(); " +

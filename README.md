@@ -86,8 +86,10 @@ ensemble :
 - **Mise à jour de l'APK** : l'application (depuis la 1.8) vérifie au démarrage et à chaque retour au premier plan
   (au plus toutes les 6 h) si une version plus récente existe sur GitHub, et affiche alors un bandeau orange en haut
   avec un lien vers la page des versions, d'où l'on télécharge le nouvel APK. Il n'apparaît qu'une fois l'APK publié.
-  La partie web de l'application se met à jour d'elle-même ; l'APK ne porte que les widgets et le téléchargement en
-  arrière-plan.
+  Le bouton **⬆ Mises à jour de l'application** (en bas de la page, avec la version installée) ouvre cette page à
+  tout moment, sans attendre le bandeau ; le bandeau et le bouton ouvrent le navigateur depuis l'application (si
+  aucun navigateur ne répond, l'adresse est copiée et affichée). La partie web de l'application se met à jour
+  d'elle-même ; l'APK ne porte que les widgets et le téléchargement en arrière-plan.
 - **Téléchargement en arrière-plan** (1.8) : GeoMet répond ~4 à 10 requêtes par seconde quelle que soit la
   parallélisation, et un run complet en demande ~1 900 (1 372 valeurs ponctuelles + 490 grilles de carte) : des
   minutes, que la page web ne peut pas faire en étant tuée par Android. L'application télécharge donc elle-même le

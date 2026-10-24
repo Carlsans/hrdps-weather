@@ -731,6 +731,20 @@ async function changePlace() {
 // ── Android app: a newer APK on the releases page ────────────────────────────
 const APK_VERSION = /HrdpsWeatherAndroid\/([\d.]+)/.exec(navigator.userAgent)?.[1];
 const apkKey = "apk-update";
+const RELEASES = "https://github.com/Carlsans/hrdps-weather/releases/latest";
+/** Opens the releases page in the browser, through the app (it does not depend on the page's own navigation). */
+function openReleases(url = RELEASES) {
+  try { if (window.HrdpsAndroid?.openReleases) { window.HrdpsAndroid.openReleases(url); return true; } } catch { /* old APK */ }
+  return false;
+}
+function apkButtons() {
+  if (!APK_VERSION) return;
+  $("get-apk").hidden = false;
+  $("get-apk").textContent = `⬆ Mises à jour de l'application (installée : ${APK_VERSION})`;
+  $("get-apk").addEventListener("click", () => { if (!openReleases()) window.open(RELEASES, "_blank"); });
+  $("apk-update").addEventListener("click", (e) => { if (openReleases($("apk-update").href)) e.preventDefault(); });
+}
+
 function showApkUpdate(u) {
   const a = $("apk-update");
   if (!u) { a.hidden = true; return; }
@@ -805,6 +819,7 @@ async function main() {
   $("place-btn").addEventListener("click", () => openSettings(false));
   $("refresh").addEventListener("click", () => refresh(true));
   $("reload-app").addEventListener("click", reloadApp);
+  apkButtons();
   checkApk();
   document.addEventListener("visibilitychange", () => { if (!document.hidden) checkApk(); });
   try {                                                             // Android app: offer to add the widget
